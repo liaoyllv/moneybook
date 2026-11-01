@@ -2,6 +2,7 @@ package com.andersonlin.moneybook.data.repository
 
 import com.andersonlin.moneybook.data.db.BillDao
 import com.andersonlin.moneybook.data.model.Bill
+import kotlinx.coroutines.flow.onEach
 
 /** 账单仓库：对 DAO 的薄封装，ViewModel 只依赖 Repository。查询均按账本隔离。 */
 class BillRepository(private val dao: BillDao) {
@@ -34,25 +35,97 @@ class BillRepository(private val dao: BillDao) {
         maxCents: Long? = null
     ) = dao.searchBills(ledgerId, typeFilter, keyword, minCents, maxCents)
 
-    suspend fun insert(bill: Bill): Long = dao.insert(bill)
+    @Volatile
+    private var cachedTagSuggestionsLedgerId: Long = -1L
+    @Volatile
+    private var cachedTagSuggestions: Map<Long, List<String>>? = null
+    @Volatile
+    private var cachedCategoryCountsLedgerId: Long = -1L
+    @Volatile
+    private var cachedCategoryCounts: Map<Long, Int> = emptyMap()
 
-    suspend fun update(bill: Bill) = dao.update(bill)
+    fun invalidateTagCache() {
+        cachedTagSuggestions = null
+    }
 
-    suspend fun delete(bill: Bill) = dao.delete(bill)
+    fun getWarmTagSuggestions(ledgerId: Long): Map<Long, List<String>> =
+        if (cachedTagSuggestionsLedgerId == ledgerId) cachedTagSuggestions ?: emptyMap() else emptyMap()
+
+    fun getWarmCategoryCounts(ledgerId: Long): Map<Long, Int> =
+        if (cachedCategoryCountsLedgerId == ledgerId) cachedCategoryCounts else emptyMap()
+
+    fun updateWarmCategoryCounts(ledgerId: Long, counts: Map<Long, Int>) {
+        cachedCategoryCountsLedgerId = ledgerId
+        cachedCategoryCounts = counts
+    }
+
+    suspend fun getCachedTagSuggestions(ledgerId: Long): Map<Long, List<String>> {
+        val cached = cachedTagSuggestions
+        if (cachedTagSuggestionsLedgerId == ledgerId && cached != null) {
+            return cached
+        }
+        val notes = dao.getTagNotesSnapshot(ledgerId)
+        val suggestions = notes
+            .groupBy { it.categoryId }
+            .mapValues { (_, bList) ->
+                bList.flatMap { b ->
+                    (b.tags.split('\n', ',').map { it.trim() }.filter { it.isNotBlank() } +
+                        listOf(b.note.trim()).filter { it.isNotBlank() && it.length <= 30 }).distinct()
+                }.groupingBy { it }.eachCount().entries
+                    .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+                    .map { it.key }
+            }
+        cachedTagSuggestionsLedgerId = ledgerId
+        cachedTagSuggestions = suggestions
+        return suggestions
+    }
+
+    suspend fun insert(bill: Bill): Long {
+        invalidateTagCache()
+        return dao.insert(bill)
+    }
+
+    suspend fun update(bill: Bill) {
+        invalidateTagCache()
+        dao.update(bill)
+    }
+
+    suspend fun delete(bill: Bill) {
+        invalidateTagCache()
+        dao.delete(bill)
+    }
+
+    fun getCategoryCounts(ledgerId: Long) = dao.getCategoryCounts(ledgerId).onEach { list ->
+        updateWarmCategoryCounts(ledgerId, list.associate { it.categoryId to it.count })
+    }
+
+    fun getTagNotes(ledgerId: Long) = dao.getTagNotes(ledgerId)
 
     suspend fun countByCategory(categoryId: Long): Int = dao.countByCategory(categoryId)
 
-    suspend fun deleteByCategory(categoryId: Long) = dao.deleteByCategory(categoryId)
+    suspend fun deleteByCategory(categoryId: Long) {
+        invalidateTagCache()
+        dao.deleteByCategory(categoryId)
+    }
 
     suspend fun countByLedger(ledgerId: Long): Int = dao.countByLedger(ledgerId)
 
-    suspend fun deleteByLedger(ledgerId: Long) = dao.deleteByLedger(ledgerId)
+    suspend fun deleteByLedger(ledgerId: Long) {
+        invalidateTagCache()
+        dao.deleteByLedger(ledgerId)
+    }
 
     suspend fun getAllSnapshot() = dao.getAllSnapshot()
 
     suspend fun getSnapshotForLedger(ledgerId: Long) = dao.getSnapshotForLedger(ledgerId)
 
-    suspend fun insertAll(bills: List<Bill>) = dao.insertAll(bills)
+    suspend fun insertAll(bills: List<Bill>) {
+        invalidateTagCache()
+        dao.insertAll(bills)
+    }
 
-    suspend fun deleteAll() = dao.deleteAll()
+    suspend fun deleteAll() {
+        invalidateTagCache()
+        dao.deleteAll()
+    }
 }

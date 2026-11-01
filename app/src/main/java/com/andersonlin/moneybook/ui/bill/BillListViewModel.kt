@@ -9,7 +9,11 @@ import com.andersonlin.moneybook.data.repository.AccountRepository
 import com.andersonlin.moneybook.data.repository.BillRepository
 import com.andersonlin.moneybook.data.repository.CategoryRepository
 import com.andersonlin.moneybook.data.repository.LedgerRepository
+import com.andersonlin.moneybook.util.endEpochDay
+import com.andersonlin.moneybook.util.startEpochDay
 import com.andersonlin.moneybook.util.toYearMonth
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -49,12 +53,19 @@ sealed interface BillListRow {
     ) : BillListRow
 }
 
+data class BillMonthGroup(
+    val header: BillListRow.Header,
+    val items: List<BillListRow.Item>
+)
+
 data class BillListUiState(
     val items: List<BillListRow> = emptyList(),
+    val groups: List<BillMonthGroup> = emptyList(),
     val typeFilter: Int = BillFilter.TYPE_ALL,
     val keyword: String = "",
     val minCents: Long? = null,
-    val maxCents: Long? = null
+    val maxCents: Long? = null,
+    val isLoaded: Boolean = false
 ) {
     val hasAnyFilter: Boolean
         get() = keyword.isNotBlank() || typeFilter != BillFilter.TYPE_ALL ||
@@ -80,17 +91,20 @@ class BillListViewModel(
             categoryRepository.getAllCategories(),
             accountRepository.getAllAccounts()
         ) { bills, cats, accounts ->
+            val (rows, groups) = groupBills(bills, cats, accounts)
             BillListUiState(
-                items = groupBills(bills, cats, accounts),
+                items = rows,
+                groups = groups,
                 typeFilter = f.type,
                 keyword = f.keyword,
                 minCents = f.minCents,
-                maxCents = f.maxCents
+                maxCents = f.maxCents,
+                isLoaded = true
             )
         }
-    }.stateIn(
+    }.flowOn(Dispatchers.Default).stateIn(
         scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5_000),
+        started = SharingStarted.Eagerly,
         initialValue = BillListUiState()
     )
 
@@ -112,26 +126,30 @@ private fun groupBills(
     bills: List<Bill>,
     categories: List<Category>,
     accounts: List<Account>
-): List<BillListRow> {
+): Pair<List<BillListRow>, List<BillMonthGroup>> {
+    if (bills.isEmpty()) return emptyList<BillListRow>() to emptyList()
     val categoryMap = categories.associateBy { it.id }
     val accountMap = accounts.associateBy { it.id }
-    val result = mutableListOf<BillListRow>()
+    val result = ArrayList<BillListRow>(bills.size + 80)
+    val groups = ArrayList<BillMonthGroup>(80)
     var i = 0
     while (i < bills.size) {
         val month = bills[i].dateEpochDay.toYearMonth()
+        val monthStart = month.startEpochDay()
+        val monthEnd = month.endEpochDay()
         var expense = 0L
         var income = 0L
-        val monthBills = mutableListOf<Bill>()
-        while (i < bills.size && bills[i].dateEpochDay.toYearMonth() == month) {
+        val monthItems = ArrayList<BillListRow.Item>()
+        while (i < bills.size && bills[i].dateEpochDay in monthStart..monthEnd) {
             val bill = bills[i]
-            monthBills.add(bill)
+            monthItems.add(BillListRow.Item(bill, categoryMap[bill.categoryId], accountMap[bill.accountId]))
             if (bill.type == Bill.TYPE_EXPENSE) expense += bill.amountCents else income += bill.amountCents
             i++
         }
-        result.add(BillListRow.Header(month, expense, income))
-        monthBills.forEach { bill ->
-            result.add(BillListRow.Item(bill, categoryMap[bill.categoryId], accountMap[bill.accountId]))
-        }
+        val header = BillListRow.Header(month, expense, income)
+        result.add(header)
+        result.addAll(monthItems)
+        groups.add(BillMonthGroup(header, monthItems))
     }
-    return result
+    return result to groups
 }

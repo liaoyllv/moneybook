@@ -1,5 +1,6 @@
 package com.andersonlin.moneybook.data.model
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -52,7 +53,8 @@ data class Bill(
     val dateEpochDay: Long,
     val createdAt: Long = System.currentTimeMillis(),
     val attachmentUri: String? = null,
-    val attachmentMime: String? = null
+    val attachmentMime: String? = null,
+    @ColumnInfo(defaultValue = "''") val tags: String = ""
 ) {
     companion object {
         const val TYPE_EXPENSE = 0

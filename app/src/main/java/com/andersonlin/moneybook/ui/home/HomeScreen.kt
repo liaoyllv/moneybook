@@ -13,6 +13,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Surface
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -65,103 +68,61 @@ fun HomeScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var showLedgerDialog by remember { mutableStateOf(false) }
 
-    Scaffold(
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(16.dp))
-                            .clickable { showLedgerDialog = true }
-                            .padding(horizontal = 12.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(state.ledgerName)
-                        Icon(
-                            Icons.Filled.ArrowDropDown,
-                            contentDescription = "切换账本",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding(),
+        contentPadding = PaddingValues(bottom = 88.dp)
+    ) {
+        item(key = "summary", contentType = "summary") {
+            MonthSummaryCard(
+                month = state.month,
+                income = state.income,
+                expense = state.expense,
+                todayExpense = state.todayExpense,
+                ledgerName = state.ledgerName,
+                onSwitchLedger = { showLedgerDialog = true },
+                budgetCents = state.budgetCents,
+                categoryAlerts = state.categoryAlerts,
+                onSetBudget = onSetBudget
             )
-        },
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = onAddBill,
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary
-            ) {
-                Icon(Icons.Filled.Add, contentDescription = "记一笔")
-            }
         }
-    ) { padding ->
-        if (state.recentBills.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentAlignment = Alignment.Center
-            ) {
+
+        if (state.isLoaded && state.recentBills.isEmpty()) {
+            item(key = "empty", contentType = "empty") {
                 EmptyState(
                     icon = Icons.Filled.AccountBalanceWallet,
                     title = "还没有账单",
                     subtitle = "点击右下角 + 记一笔吧"
                 )
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentPadding = PaddingValues(bottom = 96.dp)
-            ) {
-                item(key = "summary") {
-                    MonthSummaryCard(
-                        month = state.month,
-                        income = state.income,
-                        expense = state.expense,
-                        budgetCents = state.budgetCents,
-                        categoryAlerts = state.categoryAlerts,
-                        onSetBudget = onSetBudget
+        } else if (state.recentBills.isNotEmpty()) {
+            item(key = "recent_header", contentType = "header") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "最近账单",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.weight(1f)
                     )
+                    TextButton(onClick = onViewAll) { Text("全部") }
                 }
-                item(key = "today") {
-                    TodayCard(
-                        todayIncome = state.todayIncome,
-                        todayExpense = state.todayExpense
-                    )
-                }
-                item(key = "goal") {
-                    HomeGoalCard(
-                        goals = state.goals,
-                        onOpenGoals = onOpenGoals
-                    )
-                }
-                item(key = "recent_header") {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = 16.dp, end = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "最近账单",
-                            style = MaterialTheme.typography.titleMedium,
-                            modifier = Modifier.weight(1f)
-                        )
-                        TextButton(onClick = onViewAll) { Text("全部") }
-                    }
-                }
-                items(state.recentBills, key = { it.id }) { bill ->
-                    BillRow(
-                        bill = bill,
-                        category = state.categories[bill.categoryId],
-                        account = state.accounts[bill.accountId],
-                        onClick = { onBillClick(bill.id) }
-                    )
-                }
+            }
+            items(
+                items = state.recentBills,
+                key = { it.id },
+                contentType = { "bill" }
+            ) { bill ->
+                BillRow(
+                    bill = bill,
+                    category = state.categories[bill.categoryId],
+                    account = state.accounts[bill.accountId],
+                    onClick = { onBillClick(bill.id) }
+                )
             }
         }
     }
@@ -211,114 +172,13 @@ fun HomeScreen(
 }
 
 @Composable
-private fun HomeGoalCard(goals: List<com.andersonlin.moneybook.data.model.Goal>, onOpenGoals: () -> Unit) {
-    val activeGoal = goals.firstOrNull { it.savedCents < it.targetCents }
-    Card(
-        onClick = onOpenGoals,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        shape = RoundedCornerShape(16.dp)
-    ) {
-        Column(Modifier.padding(horizontal = 20.dp, vertical = 14.dp)) {
-            if (activeGoal == null) {
-                Text(
-                    text = "🎯 设定存钱目标，攒钱更有动力",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else {
-                val progress = activeGoal.toProgress()
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = "${activeGoal.icon} ${activeGoal.name}",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Text(
-                        text = "每月需存 ${formatCents(progress.monthlyNeedCents ?: 0L)}",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-                Spacer(Modifier.height(8.dp))
-                LinearProgressIndicator(
-                    progress = { progress.percent },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(8.dp)
-                        .clip(RoundedCornerShape(4.dp)),
-                    color = MaterialTheme.colorScheme.tertiary
-                )
-                Spacer(Modifier.height(6.dp))
-                Row {
-                    Text(
-                        text = "已存 ${formatCents(activeGoal.savedCents)} / ${formatCents(activeGoal.targetCents)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Text(
-                        text = "${(progress.percent * 100).toInt()}%",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun TodayCard(todayIncome: Long, todayExpense: Long) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        shape = RoundedCornerShape(16.dp)
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "今日",
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f)
-            )
-            Text(
-                text = "支出 " + formatCents(todayExpense),
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.error
-            )
-            Spacer(Modifier.width(20.dp))
-            Text(
-                text = "收入 " + formatCents(todayIncome),
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.primary
-            )
-        }
-    }
-}
-
-@Composable
 private fun MonthSummaryCard(
     month: YearMonth,
     income: Long,
     expense: Long,
+    todayExpense: Long,
+    ledgerName: String,
+    onSwitchLedger: () -> Unit,
     budgetCents: Long?,
     categoryAlerts: List<CategoryAlert>,
     onSetBudget: () -> Unit
@@ -326,73 +186,95 @@ private fun MonthSummaryCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(16.dp),
+            .padding(horizontal = 16.dp, vertical = 6.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.primaryContainer
         ),
-        shape = RoundedCornerShape(20.dp)
+        shape = RoundedCornerShape(18.dp)
     ) {
-        Column(Modifier.padding(20.dp)) {
-            Text(
-                text = "${month.year}年${month.monthValue}月",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onPrimaryContainer
-            )
-            Spacer(Modifier.height(12.dp))
-            Text(
-                text = "结余 " + formatCents(income - expense),
-                style = MaterialTheme.typography.headlineLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onPrimaryContainer
-            )
-            Spacer(Modifier.height(16.dp))
-            Row(Modifier.fillMaxWidth()) {
-                Column(Modifier.weight(1f)) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+            // 顶行：年月 + 弱化收敛的账本切换胶囊
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "${month.year}年${month.monthValue}月",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+                Surface(
+                    onClick = onSwitchLedger,
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.12f)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = ledgerName,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        Icon(
+                            Icons.Filled.ArrowDropDown,
+                            contentDescription = "切换账本",
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // 主数值行：月支出 + 今日支出并列
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
                     Text(
-                        text = "收入",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                    )
-                    Text(
-                        text = "+" + formatCents(income),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
+                        text = "支出 ¥" + formatCents(expense),
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 }
-                Column(
-                    Modifier.weight(1f),
-                    horizontalAlignment = Alignment.End
-                ) {
+                Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        text = "支出",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                        text = "今日支出",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f)
                     )
                     Text(
-                        text = "-" + formatCents(expense),
+                        text = "¥" + formatCents(todayExpense),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 }
             }
-
             // 预算进度 / 超支提醒
             val budget = budgetCents
             if (budget != null && budget > 0) {
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(10.dp))
                 val ratio = (expense.toDouble() / budget).coerceIn(0.0, 1.0)
                 LinearProgressIndicator(
                     progress = { ratio.toFloat() },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(8.dp)
-                        .clip(RoundedCornerShape(4.dp)),
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp)),
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
                     trackColor = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.25f)
                 )
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(4.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
@@ -403,7 +285,7 @@ private fun MonthSummaryCard(
                         } else {
                             "剩余 ${formatCents(budget - expense)}"
                         },
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.SemiBold,
                         color = if (expense > budget) {
                             MaterialTheme.colorScheme.error
@@ -414,15 +296,19 @@ private fun MonthSummaryCard(
                     )
                     Text(
                         text = "预算 ${formatCents(budget)}",
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
                     )
                 }
             } else {
-                Spacer(Modifier.height(8.dp))
-                TextButton(onClick = onSetBudget) {
+                Spacer(Modifier.height(4.dp))
+                TextButton(
+                    onClick = onSetBudget,
+                    contentPadding = PaddingValues(horizontal = 0.dp, vertical = 2.dp)
+                ) {
                     Text(
-                        text = "设置本月预算",
+                        text = "+ 设置本月预算",
+                        style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 }

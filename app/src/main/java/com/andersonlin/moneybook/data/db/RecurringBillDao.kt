@@ -31,6 +31,9 @@ interface RecurringBillDao {
     @Query("UPDATE recurring_bills SET lastGeneratedEpochDay = :day WHERE id = :id")
     suspend fun updateLastGenerated(id: Long, day: Long)
 
+    @Query("UPDATE recurring_bills SET categoryId = :target WHERE categoryId = :source")
+    suspend fun reassignCategory(source: Long, target: Long)
+
     @Query("DELETE FROM recurring_bills WHERE categoryId = :categoryId")
     suspend fun deleteByCategory(categoryId: Long)
 

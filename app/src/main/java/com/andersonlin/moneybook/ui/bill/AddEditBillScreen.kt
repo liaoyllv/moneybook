@@ -9,6 +9,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.material3.TextField
+import androidx.compose.runtime.key
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -33,9 +39,12 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Button
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
@@ -73,9 +82,12 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.andersonlin.moneybook.MainActivity
@@ -103,6 +115,8 @@ fun AddEditBillScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val amountFocusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showDatePicker by remember { mutableStateOf(false) }
     var showImageViewer by remember { mutableStateOf(false) }
@@ -110,13 +124,15 @@ fun AddEditBillScreen(
     val appContext = context.applicationContext
     val activity = remember(context) { context.findActivity() as? MainActivity }
 
-    LaunchedEffect(billId) { viewModel.init(billId, defaultType, initialDate) }
+    LaunchedEffect(billId, initialDate) { viewModel.init(billId, defaultType, initialDate) }
 
     LaunchedEffect(Unit) {
         viewModel.events.collect { event ->
             when (event) {
                 is AddEditEvent.ShowMessage -> snackbarHostState.showSnackbar(event.message)
                 AddEditEvent.Saved -> {
+                    focusManager.clearFocus()
+                    keyboardController?.hide()
                     (appContext as? MoneyBookApp)?.requestWidgetUpdate()
                     onBack()
                 }
@@ -126,6 +142,8 @@ fun AddEditBillScreen(
                     amountFocusRequester.requestFocus()
                 }
                 AddEditEvent.Deleted -> {
+                    focusManager.clearFocus()
+                    keyboardController?.hide()
                     (appContext as? MoneyBookApp)?.requestWidgetUpdate()
                     onBack()
                 }
@@ -136,15 +154,214 @@ fun AddEditBillScreen(
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = { SnackbarHost(snackbarHostState) },
+        bottomBar = {
+            Surface(tonalElevation = 3.dp) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .imePadding()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                ) {
+                    var accountMenuExpanded by remember { mutableStateOf(false) }
+                    val currentAccount = state.accounts.firstOrNull { it.id == state.accountId }
+                        ?: state.accounts.firstOrNull()
+
+                    // 金额输入与支付方式单行并排
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            if (state.amountError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outlineVariant
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(50.dp)
+                                .padding(horizontal = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "¥",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null
+                                    ) {
+                                        amountFocusRequester.requestFocus()
+                                        keyboardController?.show()
+                                    },
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                androidx.compose.foundation.text.BasicTextField(
+                                    value = state.amountText,
+                                    onValueChange = viewModel::setAmount,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .focusRequester(amountFocusRequester),
+                                    singleLine = true,
+                                    textStyle = MaterialTheme.typography.titleLarge.copy(
+                                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    ),
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
+                                    decorationBox = { innerTextField ->
+                                        if (state.amountText.isEmpty()) {
+                                            Text(
+                                                "0.00",
+                                                style = MaterialTheme.typography.titleLarge,
+                                                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+                                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                                            )
+                                        }
+                                        innerTextField()
+                                    }
+                                )
+                            }
+                            // 分隔竖线
+                            Box(
+                                modifier = Modifier
+                                    .padding(horizontal = 8.dp)
+                                    .width(1.dp)
+                                    .height(22.dp)
+                                    .background(MaterialTheme.colorScheme.outlineVariant)
+                            )
+                            // 支付账户下拉
+                            Box {
+                                Surface(
+                                    onClick = { accountMenuExpanded = true },
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color.Transparent
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text(
+                                            text = (currentAccount?.name ?: "选择账户") + " ▾",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                                DropdownMenu(
+                                    expanded = accountMenuExpanded,
+                                    onDismissRequest = { accountMenuExpanded = false }
+                                ) {
+                                    state.accounts.forEach { account ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                ) {
+                                                    Text(account.icon)
+                                                    Text(account.name, style = MaterialTheme.typography.bodyMedium)
+                                                    if (account.id == state.accountId) {
+                                                        Text("✓", color = MaterialTheme.colorScheme.primary, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                                                    }
+                                                }
+                                            },
+                                            onClick = {
+                                                viewModel.setAccount(account.id)
+                                                accountMenuExpanded = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (state.isEdit) {
+                        Button(
+                            onClick = { viewModel.save(andContinue = false) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(50.dp),
+                            shape = RoundedCornerShape(25.dp)
+                        ) {
+                            Text("保存", style = MaterialTheme.typography.titleMedium)
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = { viewModel.save(andContinue = true) },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(50.dp),
+                                shape = RoundedCornerShape(25.dp)
+                            ) {
+                                Text("继续记", style = MaterialTheme.typography.titleMedium)
+                            }
+                            Button(
+                                onClick = { viewModel.save(andContinue = false) },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(50.dp),
+                                shape = RoundedCornerShape(25.dp)
+                            ) {
+                                Text("记完了", style = MaterialTheme.typography.titleMedium)
+                            }
+                        }
+                    }
+                }
+            }
+        },
         topBar = {
             TopAppBar(
-                title = { Text(if (state.isEdit) "编辑账单" else "记一笔") },
+                title = {
+                    Text(
+                        text = if (state.isEdit) "编辑账单" else "记一笔",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
                 actions = {
+                    TextButton(
+                        onClick = { viewModel.setType(Bill.TYPE_EXPENSE) },
+                        contentPadding = PaddingValues(horizontal = 6.dp)
+                    ) {
+                        Text(
+                            text = if (state.type == Bill.TYPE_EXPENSE) "✓ 支出" else "支出",
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
+                    TextButton(
+                        onClick = { viewModel.setType(Bill.TYPE_INCOME) },
+                        contentPadding = PaddingValues(horizontal = 6.dp)
+                    ) {
+                        Text(
+                            text = if (state.type == Bill.TYPE_INCOME) "✓ 收入" else "收入",
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
                     if (state.isEdit) {
                         IconButton(onClick = { showDeleteDialog = true }) {
                             Icon(Icons.Filled.Delete, contentDescription = "删除")
@@ -159,307 +376,266 @@ fun AddEditBillScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .imePadding()
                 .padding(horizontal = 16.dp)
         ) {
-            // 支出 / 收入切换
-            SingleChoiceSegmentedButtonRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp)
-            ) {
-                SegmentedButton(
-                    selected = state.type == Bill.TYPE_EXPENSE,
-                    onClick = { viewModel.setType(Bill.TYPE_EXPENSE) },
-                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
-                    label = { Text("支出") }
-                )
-                SegmentedButton(
-                    selected = state.type == Bill.TYPE_INCOME,
-                    onClick = { viewModel.setType(Bill.TYPE_INCOME) },
-                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-                    label = { Text("收入") }
-                )
-            }
-
-            Spacer(Modifier.height(16.dp))
-
-            // 金额
-            OutlinedTextField(
-                value = state.amountText,
-                onValueChange = viewModel::setAmount,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .focusRequester(amountFocusRequester),
-                label = { Text("金额") },
-                prefix = { Text("¥") },
-                isError = state.amountError,
-                supportingText = if (state.amountError) {
-                    { Text("请输入有效金额") }
-                } else {
-                    null
-                },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                textStyle = MaterialTheme.typography.headlineSmall,
-                singleLine = true
-            )
-
-            Spacer(Modifier.height(16.dp))
-
             // 分类
-            Text("分类", style = MaterialTheme.typography.titleSmall)
-            if (state.categories.isEmpty()) {
+            if (state.categoriesLoaded && state.categories.isEmpty()) {
                 Text(
                     text = "暂无分类，请先到「设置-分类管理」添加",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.outline,
                     modifier = Modifier.padding(vertical = 8.dp)
                 )
-            } else {
-                FlowRow(
-                    modifier = Modifier.padding(top = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+            } else if (state.categories.isNotEmpty()) {
+                com.andersonlin.moneybook.ui.components.CategoryPicker(
+                    state.categories, state.categoryId, viewModel::setCategory, viewModel::reorderCategories
+                )
+            }
+
+            Spacer(Modifier.height(6.dp))
+
+            key(state.categoryId) {
+                com.andersonlin.moneybook.ui.components.CompactTags(
+                    state.tagSuggestions,state.tags,viewModel::toggleTag,viewModel::addTag)
+            }
+
+            Spacer(Modifier.height(4.dp))
+
+            // 日期与附件快捷条（单行收拢，右侧附件图标/缩略胶囊）
+            var attachmentMenuExpanded by remember { mutableStateOf(false) }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Surface(
+                    onClick = { showDatePicker = true },
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
                 ) {
-                    state.categories.forEach { category ->
-                        FilterChip(
-                            selected = state.categoryId == category.id,
-                            onClick = { viewModel.setCategory(category.id) },
-                            label = { Text("${category.icon} ${category.name}") }
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Filled.DateRange,
+                            contentDescription = "选择日期",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = fullDateLabel(state.dateEpochDay) + " ▾",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                     }
                 }
-            }
 
-            Spacer(Modifier.height(16.dp))
-
-            // 账户
-            Text("账户", style = MaterialTheme.typography.titleSmall)
-            FlowRow(
-                modifier = Modifier.padding(top = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                state.accounts.forEach { account ->
-                    FilterChip(
-                        selected = state.accountId == account.id,
-                        onClick = { viewModel.setAccount(account.id) },
-                        label = { Text("${account.icon} ${account.name}") }
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(16.dp))
-
-            // 备注
-            OutlinedTextField(
-                value = state.note,
-                onValueChange = viewModel::setNote,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("备注（可选）") },
-                singleLine = true
-            )
-
-            Spacer(Modifier.height(16.dp))
-
-            // 日期
-            Surface(
-                onClick = { showDatePicker = true },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant
-            ) {
+                // 附件区域：已选时展示微缩胶囊预览；未选时展示添加小按钮
                 Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Icon(
-                        Icons.Filled.DateRange,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Text(
-                        text = fullDateLabel(state.dateEpochDay),
-                        style = MaterialTheme.typography.bodyLarge,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Icon(
-                        Icons.Filled.ArrowDropDown,
-                        contentDescription = "选择日期",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(16.dp))
-
-            // 附件
-            Text("附件（可选）", style = MaterialTheme.typography.titleSmall)
-            Row(
-                modifier = Modifier.padding(top = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                OutlinedButton(
-                    onClick = {
-                        activity?.pickImage { uri ->
-                            if (uri != null) {
-                                // 查询真实 MIME（content:// 图库 Uri 无扩展名）
-                                val mime = runCatching {
-                                    context.contentResolver.getType(uri)
-                                }.getOrNull() ?: "image/*"
-                                viewModel.setAttachment(uri.toString(), mime)
-                            }
-                        }
-                    },
-                    shape = RoundedCornerShape(20.dp)
-                ) {
-                    Icon(Icons.Filled.Image, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("截图 / 相册")
-                }
-                OutlinedButton(
-                    onClick = {
-                        activity?.pickAttachment { uri ->
-                            if (uri != null) {
-                                val mime = runCatching {
-                                    context.contentResolver.getType(uri)
-                                }.getOrNull() ?: "application/octet-stream"
-                                viewModel.setAttachment(uri.toString(), mime)
-                            }
-                        }
-                    },
-                    shape = RoundedCornerShape(20.dp)
-                ) {
-                    Icon(Icons.Filled.AttachFile, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("附件")
-                }
-            }
-
-            if (state.hasAttachment) {
-                Spacer(Modifier.height(8.dp))
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant
-                ) {
-                    Row(
-                        modifier = Modifier.padding(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (state.attachmentIsImage) {
-                            AsyncImage(
-                                model = Uri.parse(state.attachmentUri),
-                                contentDescription = "点击查看大图",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .size(64.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .clickable { showImageViewer = true }
-                            )
-                        } else {
-                            Icon(
-                                Icons.Filled.InsertDriveFile,
-                                contentDescription = "点击打开文件",
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clickable {
-                                        state.attachmentUri?.let {
-                                            activity?.openAttachmentViewer(it, state.attachmentMime)
-                                        }
-                                    },
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                        Spacer(Modifier.width(10.dp))
-                        Text(
-                            text = state.attachmentUri
-                                ?.substringAfterLast('/')
-                                ?.takeIf { it.isNotBlank() } ?: "附件",
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier
-                                .weight(1f)
-                                .clickable {
-                                    if (state.attachmentIsImage) {
-                                        showImageViewer = true
-                                    } else {
-                                        state.attachmentUri?.let {
+                    if (state.hasAttachment) {
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+                            modifier = Modifier.height(30.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(start = 6.dp, end = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                if (state.attachmentIsImage) {
+                                    AsyncImage(
+                                        model = Uri.parse(state.attachmentUri),
+                                        contentDescription = "查看大图",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier
+                                            .size(20.dp)
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .clickable { showImageViewer = true }
+                                    )
+                                } else {
+                                    Icon(
+                                        Icons.Filled.InsertDriveFile,
+                                        contentDescription = "查看文件",
+                                        modifier = Modifier
+                                            .size(16.dp)
+                                            .clickable {
+                                                state.attachmentUri?.let {
+                                                    activity?.openAttachmentViewer(it, state.attachmentMime)
+                                                }
+                                            },
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                Text(
+                                    text = if (state.attachmentIsImage) "图片" else "附件",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    modifier = Modifier.clickable {
+                                        if (state.attachmentIsImage) showImageViewer = true
+                                        else state.attachmentUri?.let {
                                             activity?.openAttachmentViewer(it, state.attachmentMime)
                                         }
                                     }
+                                )
+                                IconButton(
+                                    onClick = viewModel::clearAttachment,
+                                    modifier = Modifier.size(20.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Close,
+                                        contentDescription = "移除附件",
+                                        modifier = Modifier.size(12.dp)
+                                    )
                                 }
-                        )
-                        IconButton(onClick = viewModel::clearAttachment) {
-                            Icon(Icons.Filled.Close, contentDescription = "移除附件")
+                            }
+                        }
+                    }
+
+                    Box {
+                        Surface(
+                            onClick = { attachmentMenuExpanded = true },
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    Icons.Filled.AttachFile,
+                                    contentDescription = "添加附件",
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = if (state.hasAttachment) "更换" else "附件",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        DropdownMenu(
+                            expanded = attachmentMenuExpanded,
+                            onDismissRequest = { attachmentMenuExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                leadingIcon = { Icon(Icons.Filled.Image, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                                text = { Text("拍照 / 相册", style = MaterialTheme.typography.bodyMedium) },
+                                onClick = {
+                                    attachmentMenuExpanded = false
+                                    activity?.pickImage { uri ->
+                                        if (uri != null) {
+                                            val mime = runCatching { context.contentResolver.getType(uri) }.getOrNull() ?: "image/*"
+                                            viewModel.setAttachment(uri.toString(), mime)
+                                        }
+                                    }
+                                }
+                            )
+                            DropdownMenuItem(
+                                leadingIcon = { Icon(Icons.Filled.AttachFile, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                                text = { Text("选取文件", style = MaterialTheme.typography.bodyMedium) },
+                                onClick = {
+                                    attachmentMenuExpanded = false
+                                    activity?.pickAttachment { uri ->
+                                        if (uri != null) {
+                                            val mime = runCatching { context.contentResolver.getType(uri) }.getOrNull() ?: "application/octet-stream"
+                                            viewModel.setAttachment(uri.toString(), mime)
+                                        }
+                                    }
+                                }
+                            )
                         }
                     }
                 }
             }
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(4.dp))
 
-            if (state.isEdit) {
-                Button(
-                    onClick = { viewModel.save(andContinue = false) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp),
-                    shape = RoundedCornerShape(26.dp)
-                ) {
-                    Text("保存", style = MaterialTheme.typography.titleMedium)
-                }
-            } else {
-                // 连续记账：继续记（留在本页）/ 记完了（返回）
+            // 单行轻量备注输入框（不占高度、不遮挡、随输随记）
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(38.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    OutlinedButton(
-                        onClick = { viewModel.save(andContinue = true) },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(52.dp),
-                        shape = RoundedCornerShape(26.dp)
-                    ) {
-                        Text("继续记", style = MaterialTheme.typography.titleMedium)
-                    }
-                    Button(
-                        onClick = { viewModel.save(andContinue = false) },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(52.dp),
-                        shape = RoundedCornerShape(26.dp)
-                    ) {
-                        Text("记完了", style = MaterialTheme.typography.titleMedium)
+                    Icon(
+                        Icons.Filled.Edit,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    androidx.compose.foundation.text.BasicTextField(
+                        value = state.note,
+                        onValueChange = viewModel::setNote,
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(
+                            color = MaterialTheme.colorScheme.onSurface
+                        ),
+                        cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
+                        decorationBox = { innerTextField ->
+                            if (state.note.isEmpty()) {
+                                Text(
+                                    "写点备注（可选）...",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
+                                )
+                            }
+                            innerTextField()
+                        }
+                    )
+                    if (state.note.isNotEmpty()) {
+                        IconButton(
+                            onClick = { viewModel.setNote("") },
+                            modifier = Modifier.size(20.dp)
+                        ) {
+                            Icon(
+                                Icons.Filled.Close,
+                                contentDescription = "清空备注",
+                                modifier = Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(8.dp))
         }
     }
 
-    if (showDatePicker) {
-        val datePickerState = rememberDatePickerState(
-            initialSelectedDateMillis = state.dateEpochDay * 86_400_000L
-        )
-        DatePickerDialog(
-            onDismissRequest = { showDatePicker = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    datePickerState.selectedDateMillis?.let { millis ->
-                        viewModel.setDate(millis / 86_400_000L)
+    if(showDatePicker) {
+        var date by remember { mutableStateOf(java.time.LocalDate.ofEpochDay(state.dateEpochDay)) }
+        AlertDialog(onDismissRequest={showDatePicker=false},title={Text("选择日期")},text={
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                listOf("年" to date.year,"月" to date.monthValue,"日" to date.dayOfMonth).forEachIndexed { index, pair ->
+                    Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween) {
+                        TextButton(onClick={date=when(index) {0->date.minusYears(1);1->date.minusMonths(1);else->date.minusDays(1)}}) { Text("－") }
+                        Text("${pair.second} ${pair.first}",style=MaterialTheme.typography.titleMedium)
+                        TextButton(onClick={date=when(index) {0->date.plusYears(1);1->date.plusMonths(1);else->date.plusDays(1)}}) { Text("＋") }
                     }
-                    showDatePicker = false
-                }) { Text("确定") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDatePicker = false }) { Text("取消") }
+                }
+                TextButton(onClick={date=java.time.LocalDate.now()}) { Text("回到今天") }
             }
-        ) {
-            DatePicker(state = datePickerState)
-        }
+        },confirmButton={TextButton(onClick={viewModel.setDate(date.toEpochDay());showDatePicker=false}) {Text("确定")}},
+        dismissButton={TextButton(onClick={showDatePicker=false}) {Text("取消")}})
     }
 
     if (showDeleteDialog) {

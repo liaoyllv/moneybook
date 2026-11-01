@@ -1,6 +1,8 @@
 package com.andersonlin.moneybook
 
 import android.app.Application
+import androidx.room.withTransaction
+import com.andersonlin.moneybook.data.model.withSuggestedIcon
 import com.andersonlin.moneybook.data.backup.BackupManager
 import com.andersonlin.moneybook.data.db.AppDatabase
 import com.andersonlin.moneybook.data.reminder.ReminderRepository
@@ -30,7 +32,7 @@ class MoneyBookApp : Application() {
 
     val database: AppDatabase by lazy { AppDatabase.get(this) }
     val billRepository: BillRepository by lazy { BillRepository(database.billDao()) }
-    val categoryRepository: CategoryRepository by lazy { CategoryRepository(database.categoryDao()) }
+    val categoryRepository: CategoryRepository by lazy { CategoryRepository(database, database.categoryDao()) }
     val accountRepository: AccountRepository by lazy { AccountRepository(database, database.accountDao()) }
     val budgetRepository: BudgetRepository by lazy { BudgetRepository(database.budgetDao()) }
     val recurringRepository: RecurringRepository by lazy {
@@ -55,7 +57,15 @@ class MoneyBookApp : Application() {
         super.onCreate()
         // 启动时补记到期的周期账单（失败不影响使用）
         applicationScope.launch {
-            runCatching { recurringRepository.generateDue() }
+            runCatching {
+                database.withTransaction {
+                    database.categoryDao().getAllSnapshot().forEach { c ->
+                        val updated=c.withSuggestedIcon()
+                        if(updated!=c) database.categoryDao().update(updated)
+                    }
+                }
+                recurringRepository.generateDue()
+            }
         }
         // 启动时同步记账提醒调度（已开启则按设定时间重新调度）
         applicationScope.launch {

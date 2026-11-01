@@ -11,6 +11,8 @@ import com.andersonlin.moneybook.data.repository.CategoryRepository
 import com.andersonlin.moneybook.data.repository.LedgerRepository
 import com.andersonlin.moneybook.util.formatCentsPlain
 import com.andersonlin.moneybook.util.toCents
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,6 +22,8 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.combine
+import com.andersonlin.moneybook.ui.stats.tagsOf
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 
@@ -28,9 +32,12 @@ data class AddEditUiState(
     val type: Int = Bill.TYPE_EXPENSE,
     val amountText: String = "",
     val note: String = "",
+    val tags: List<String> = emptyList(),
+    val tagSuggestions: List<String> = emptyList(),
     val dateEpochDay: Long = LocalDate.now().toEpochDay(),
     val categoryId: Long? = null,
     val categories: List<Category> = emptyList(),
+    val categoriesLoaded: Boolean = false,
     val accountId: Long = Bill.DEFAULT_ACCOUNT_ID,
     val accounts: List<Account> = emptyList(),
     val amountError: Boolean = false,
@@ -64,51 +71,107 @@ class AddEditBillViewModel(
     val events = _events.asSharedFlow()
 
     private var bill: Bill? = null
-    private var initialized = false
+    private var saving = false
+    private var accountChosen = false
+    private var categoryCountsMap: Map<Long, Int> =
+        billRepository.getWarmCategoryCounts(ledgerRepository.cachedActiveLedgerId)
+    private var tagSuggestionsMap: Map<Long, List<String>> =
+        billRepository.getWarmTagSuggestions(ledgerRepository.cachedActiveLedgerId)
+    private var flowsStarted = false
+
+    private fun warmCategoriesForType(type: Int): List<Category> {
+        val counts = categoryCountsMap
+        return categoryRepository.cachedCategories
+            .filter { it.type == type }
+            .sortedWith(
+                compareByDescending<Category> { counts[it.id] ?: 0 }
+                    .thenBy { it.sortOrder }
+                    .thenBy { it.id }
+            )
+    }
 
     /** 进入页面时调用：billId > 0 为编辑模式，否则为新增；initialDate > 0 时作为新增的预填日期 */
     fun init(billId: Long, defaultType: Int, initialDate: Long = 0L) {
-        if (initialized) return
-        initialized = true
+        saving = false
+        accountChosen = false
+        val todayEpochDay = LocalDate.now().toEpochDay()
+        val activeLedgerId = ledgerRepository.cachedActiveLedgerId
+        categoryCountsMap = billRepository.getWarmCategoryCounts(activeLedgerId).ifEmpty { categoryCountsMap }
+        tagSuggestionsMap = billRepository.getWarmTagSuggestions(activeLedgerId).ifEmpty { tagSuggestionsMap }
 
-        // 当前类型的分类列表，类型切换后自动选中第一个分类。
-        // 携带 type 一起发射，避免旧类型的列表迟到后覆盖新类型状态。
-        viewModelScope.launch {
-            _uiState
-                .map { it.type }
-                .distinctUntilChanged()
-                .flatMapLatest { type ->
-                    categoryRepository.getCategoriesByType(type).map { type to it }
-                }
-                .collect { (type, categories) ->
-                    _uiState.update { state ->
-                        if (state.type != type) {
-                            // 迟到的旧类型列表，忽略，避免覆盖 categoryId
-                            state.copy(categories = categories)
-                        } else {
-                            val categoryId = if (state.categoryId != null &&
-                                categories.any { it.id == state.categoryId }
-                            ) {
-                                state.categoryId
-                            } else {
-                                categories.firstOrNull()?.id
-                            }
-                            state.copy(categories = categories, categoryId = categoryId)
+        if (!flowsStarted) {
+            flowsStarted = true
+            // 1. 轻量化标签与备注建议（优先命中内存缓存，未命中时后台计算）
+            viewModelScope.launch(Dispatchers.Default) {
+                ledgerRepository.activeLedgerId
+                    .collect { ledgerId ->
+                        val suggestions = billRepository.getCachedTagSuggestions(ledgerId)
+                        tagSuggestionsMap = suggestions
+                        val currentCatId = _uiState.value.categoryId
+                        if (currentCatId != null) {
+                            val curSuggestions = suggestions[currentCatId] ?: emptyList()
+                            _uiState.update { it.copy(tagSuggestions = curSuggestions) }
                         }
                     }
-                }
-        }
+            }
 
-        // 账户列表（不分收支类型），默认选中第一个账户
-        viewModelScope.launch {
-            accountRepository.getAllAccounts().collect { accounts ->
-                _uiState.update { state ->
-                    val accountId = if (accounts.any { it.id == state.accountId }) {
-                        state.accountId
-                    } else {
-                        accounts.firstOrNull()?.id ?: Bill.DEFAULT_ACCOUNT_ID
+            // 2. 当前类型的分类列表 + 分类使用频次联合排序（消除竞态）
+            viewModelScope.launch {
+                combine(
+                    _uiState
+                        .map { it.type }
+                        .distinctUntilChanged()
+                        .flatMapLatest { type ->
+                            categoryRepository.getCategoriesByType(type).map { type to it }
+                        },
+                    ledgerRepository.activeLedgerId.flatMapLatest { billRepository.getCategoryCounts(it) }
+                ) { (type, categories), countList ->
+                    val counts = countList.associate { it.categoryId to it.count }
+                    categoryCountsMap = counts
+                    type to categories.sortedWith(
+                        compareByDescending<Category> { counts[it.id] ?: 0 }
+                            .thenBy { it.sortOrder }
+                            .thenBy { it.id }
+                    )
+                }
+                    .flowOn(Dispatchers.Default)
+                    .collect { (type, categories) ->
+                        _uiState.update { state ->
+                            if (state.type != type) {
+                                state
+                            } else {
+                                val categoryId = if (state.categoryId != null &&
+                                    categories.any { it.id == state.categoryId }
+                                ) {
+                                    state.categoryId
+                                } else {
+                                    categories.firstOrNull()?.id
+                                }
+                                val suggestions = categoryId?.let { tagSuggestionsMap[it] } ?: emptyList()
+                                state.copy(
+                                    categories = categories,
+                                    categoriesLoaded = true,
+                                    categoryId = categoryId,
+                                    tagSuggestions = suggestions
+                                )
+                            }
+                        }
                     }
-                    state.copy(accounts = accounts, accountId = accountId)
+            }
+
+            // 3. 账户列表
+            viewModelScope.launch {
+                accountRepository.getAllAccounts().collect { accounts ->
+                    _uiState.update { state ->
+                        val accountId = if (!accountChosen && (bill == null || !state.isEdit)) {
+                            accounts.firstOrNull { it.name == "支付宝" }?.id ?: accounts.firstOrNull()?.id ?: Bill.DEFAULT_ACCOUNT_ID
+                        } else if (accounts.any { it.id == state.accountId }) {
+                            state.accountId
+                        } else {
+                            accounts.firstOrNull()?.id ?: Bill.DEFAULT_ACCOUNT_ID
+                        }
+                        state.copy(accounts = accounts, accountId = accountId)
+                    }
                 }
             }
         }
@@ -123,29 +186,66 @@ class AddEditBillViewModel(
                             type = b.type,
                             amountText = formatCentsPlain(b.amountCents),
                             note = b.note,
+                            tags = tagsOf(b.tags),
                             dateEpochDay = b.dateEpochDay,
                             categoryId = b.categoryId,
                             accountId = b.accountId,
                             attachmentUri = b.attachmentUri,
-                            attachmentMime = b.attachmentMime
+                            attachmentMime = b.attachmentMime,
+                            amountError = false,
+                            tagSuggestions = tagSuggestionsMap[b.categoryId] ?: emptyList()
                         )
                     }
                 }
             }
         } else {
-            _uiState.update {
-                it.copy(
+            bill = null
+            val targetDate = if (initialDate > 0) initialDate else todayEpochDay
+            val warmCats = warmCategoriesForType(defaultType)
+            val warmAccounts = accountRepository.cachedAccounts
+            _uiState.update { state ->
+                val cats = state.categories.ifEmpty { warmCats }
+                val catId = state.categoryId?.takeIf { id -> cats.any { it.id == id } } ?: cats.firstOrNull()?.id
+                val accs = state.accounts.ifEmpty { warmAccounts }
+                val defaultAccId = accs.firstOrNull { it.name == "支付宝" }?.id
+                    ?: accs.firstOrNull()?.id
+                    ?: state.accountId
+                state.copy(
                     isEdit = false,
                     type = defaultType,
-                    dateEpochDay = if (initialDate > 0) initialDate else LocalDate.now().toEpochDay()
+                    amountText = "",
+                    note = "",
+                    tags = emptyList(),
+                    dateEpochDay = targetDate,
+                    categories = cats,
+                    categoriesLoaded = cats.isNotEmpty() || state.categoriesLoaded,
+                    categoryId = catId,
+                    accounts = accs,
+                    accountId = defaultAccId,
+                    amountError = false,
+                    attachmentUri = null,
+                    attachmentMime = null,
+                    tagSuggestions = catId?.let { tagSuggestionsMap[it] } ?: emptyList()
                 )
             }
         }
     }
 
-    fun setType(type: Int) = _uiState.update { it.copy(type = type, categoryId = null) }
+    fun setType(type: Int) = _uiState.update {
+        if (it.type == type) it else {
+            val warmCats = warmCategoriesForType(type)
+            val catId = warmCats.firstOrNull()?.id
+            it.copy(
+                type = type,
+                categories = warmCats,
+                categoryId = catId,
+                tags = emptyList(),
+                tagSuggestions = catId?.let { id -> tagSuggestionsMap[id] } ?: emptyList()
+            )
+        }
+    }
 
-    fun setAccount(id: Long) = _uiState.update { it.copy(accountId = id) }
+    fun setAccount(id: Long) { accountChosen=true;_uiState.update { it.copy(accountId=id) } }
 
     fun setAttachment(uri: String?, mime: String?) =
         _uiState.update { it.copy(attachmentUri = uri, attachmentMime = mime) }
@@ -164,7 +264,28 @@ class AddEditBillViewModel(
 
     fun setDate(epochDay: Long) = _uiState.update { it.copy(dateEpochDay = epochDay) }
 
-    fun setCategory(id: Long) = _uiState.update { it.copy(categoryId = id) }
+    fun setCategory(id: Long) {
+        if (_uiState.value.categoryId == id) return
+        val suggestions = tagSuggestionsMap[id] ?: emptyList()
+        _uiState.update {
+            it.copy(categoryId = id, tags = emptyList(), tagSuggestions = suggestions)
+        }
+    }
+
+    fun addTag(value: String) {
+        val tag=value.trim().replace("\n"," ").take(30)
+        if(tag !in _uiState.value.tags) toggleTag(tag)
+    }
+
+    fun toggleTag(value: String) {
+        val tag = value.trim().replace("\n", " ").take(30)
+        if(tag.isEmpty()) return
+        _uiState.update { it.copy(tags=if(tag in it.tags) it.tags-tag else it.tags+tag) }
+    }
+
+    fun reorderCategories(ids: List<Long>) { viewModelScope.launch {
+        runCatching { categoryRepository.reorder(ids) }.onFailure { emit(AddEditEvent.ShowMessage("排序失败，请重试")) }
+    } }
 
     /**
      * 保存账单。
@@ -172,6 +293,7 @@ class AddEditBillViewModel(
      *                    false = 保存后返回上一页。
      */
     fun save(andContinue: Boolean = false) {
+        if(saving) return
         val state = _uiState.value
         val cents = state.amountText.toCents()
         if (cents == null) {
@@ -184,7 +306,10 @@ class AddEditBillViewModel(
             emit(AddEditEvent.ShowMessage("请先选择分类"))
             return
         }
+        saving=true
         viewModelScope.launch {
+            var finished=false
+            try {
             val existing = bill
             val ledgerId = ledgerRepository.getActiveLedgerId()
             if (existing == null) {
@@ -196,6 +321,7 @@ class AddEditBillViewModel(
                         accountId = state.accountId,
                         ledgerId = ledgerId,
                         note = state.note.trim(),
+                        tags = state.tags.distinct().joinToString("\n"),
                         dateEpochDay = state.dateEpochDay,
                         attachmentUri = state.attachmentUri,
                         attachmentMime = state.attachmentMime
@@ -209,6 +335,7 @@ class AddEditBillViewModel(
                         categoryId = categoryId,
                         accountId = state.accountId,
                         note = state.note.trim(),
+                        tags = state.tags.distinct().joinToString("\n"),
                         dateEpochDay = state.dateEpochDay,
                         attachmentUri = state.attachmentUri,
                         attachmentMime = state.attachmentMime
@@ -221,6 +348,7 @@ class AddEditBillViewModel(
                     it.copy(
                         amountText = "",
                         note = "",
+                        tags = emptyList(),
                         amountError = false,
                         attachmentUri = null,
                         attachmentMime = null
@@ -229,8 +357,13 @@ class AddEditBillViewModel(
                 bill = null
                 _events.emit(AddEditEvent.SavedContinue)
             } else {
+                finished=true
                 _events.emit(AddEditEvent.Saved)
             }
+            } catch (e: Exception) {
+                if(e is kotlinx.coroutines.CancellationException) throw e
+                _events.emit(AddEditEvent.ShowMessage("保存失败，请重试"))
+            } finally { if(!finished) saving=false }
         }
     }
 

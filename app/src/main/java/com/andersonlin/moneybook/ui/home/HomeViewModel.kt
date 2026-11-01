@@ -16,11 +16,13 @@ import com.andersonlin.moneybook.data.repository.GoalRepository
 import com.andersonlin.moneybook.data.repository.LedgerRepository
 import com.andersonlin.moneybook.util.endEpochDay
 import com.andersonlin.moneybook.util.startEpochDay
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -49,7 +51,8 @@ data class HomeUiState(
     val ledgerId: Long = Bill.DEFAULT_LEDGER_ID,
     val ledgers: List<Ledger> = emptyList(),
     val goals: List<Goal> = emptyList(),
-    val categoryAlerts: List<CategoryAlert> = emptyList()
+    val categoryAlerts: List<CategoryAlert> = emptyList(),
+    val isLoaded: Boolean = false
 ) {
     val balance: Long get() = income - expense
 
@@ -73,6 +76,18 @@ class HomeViewModel(
 ) : ViewModel() {
 
     private val month = YearMonth.now()
+
+    init {
+        // 后台预热记一笔高频分类频次与标签建议，确保首次点击「记一笔」0帧直出
+        viewModelScope.launch(Dispatchers.Default) {
+            ledgerRepository.activeLedgerId
+                .flatMapLatest { id ->
+                    billRepository.getCachedTagSuggestions(id)
+                    billRepository.getCategoryCounts(id)
+                }
+                .collect {}
+        }
+    }
 
     private data class SummaryData(
         val income: Long,
@@ -155,7 +170,8 @@ class HomeViewModel(
                         accounts = base.accounts.associateBy { it.id },
                         ledgerId = ledgerId,
                         ledgers = ledgers,
-                        categoryAlerts = alerts.take(3)
+                        categoryAlerts = alerts.take(3),
+                        isLoaded = true
                     )
                 }
             },
@@ -163,9 +179,10 @@ class HomeViewModel(
     ) { state, goals ->
         state.copy(goals = goals)
     }
+        .flowOn(Dispatchers.Default)
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
+            started = SharingStarted.Eagerly,
             initialValue = HomeUiState(month = month)
         )
 

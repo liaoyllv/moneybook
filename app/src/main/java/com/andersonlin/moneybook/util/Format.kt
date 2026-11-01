@@ -9,7 +9,8 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /** 金额（分）格式化为 "1,234.56"，负数显示 "-1,234.56" */
-fun formatCents(cents: Long): String = amountFormat.format(cents / 100.0)
+fun formatCents(cents: Long): String =
+    requireNotNull(amountFormat.get()).format(cents / 100.0)
 
 /** 金额（分）格式化为 "1234.56"（不带分组），用于编辑时回显 */
 fun formatCentsPlain(cents: Long): String =
@@ -40,11 +41,15 @@ fun dateLabel(epochDay: Long): String {
 /** "2024年5月12日 周日" */
 fun fullDateLabel(epochDay: Long): String {
     val d = LocalDate.ofEpochDay(epochDay)
-    val week = d.format(DateTimeFormatter.ofPattern("EEE", Locale.CHINESE))
+    val week = d.format(weekFormatter)
     return "${d.year}年${d.monthValue}月${d.dayOfMonth}日 $week"
 }
 
-private val amountFormat: NumberFormat = NumberFormat.getNumberInstance(Locale.CHINA).apply {
-    minimumFractionDigits = 2
-    maximumFractionDigits = 2
+private val weekFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE", Locale.CHINESE)
+
+private val amountFormat: ThreadLocal<NumberFormat> = object : ThreadLocal<NumberFormat>() {
+    override fun initialValue(): NumberFormat = NumberFormat.getNumberInstance(Locale.CHINA).apply {
+        minimumFractionDigits = 2
+        maximumFractionDigits = 2
+    }
 }

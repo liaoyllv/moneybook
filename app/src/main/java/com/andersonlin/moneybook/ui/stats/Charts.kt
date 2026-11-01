@@ -52,7 +52,7 @@ fun BarChart(
     incomeColor: Color,
     modifier: Modifier = Modifier
 ) {
-    val maxValue = points.maxOfOrNull { max(it.expense, it.income) }?.coerceAtLeast(1L) ?: 1L
+    val maxValue = points.maxOfOrNull { it.expense }?.coerceAtLeast(1L) ?: 1L
     val barW = barWidth(points.size)
     val every = labelEvery(points.size)
     Row(
@@ -105,7 +105,7 @@ fun BarChart(
  * 收支趋势折线（Canvas 自绘，无第三方图表库）。支持 7~31 个数据点。
  */
 @Composable
-fun LineChart(
+fun ExpenseTrendChart(
     points: List<ChartPoint>,
     expenseColor: Color,
     incomeColor: Color,
@@ -119,7 +119,7 @@ fun LineChart(
                 .height(170.dp)
         ) {
             if (points.size < 2) return@Canvas
-            val maxValue = points.maxOfOrNull { max(it.expense, it.income) }?.coerceAtLeast(1L) ?: 1L
+            val maxValue = points.maxOfOrNull { it.expense }?.coerceAtLeast(1L) ?: 1L
             val stepX = size.width / (points.size - 1)
             val expenseOffsets = points.mapIndexed { index, p ->
                 Offset(
@@ -127,12 +127,7 @@ fun LineChart(
                     y = size.height - (p.expense.toFloat() / maxValue) * (size.height - 16.dp.toPx())
                 )
             }
-            val incomeOffsets = points.mapIndexed { index, p ->
-                Offset(
-                    x = stepX * index,
-                    y = size.height - (p.income.toFloat() / maxValue) * (size.height - 16.dp.toPx())
-                )
-            }
+
             for (i in 0 until expenseOffsets.size - 1) {
                 drawLine(
                     color = expenseColor,
@@ -141,21 +136,13 @@ fun LineChart(
                     strokeWidth = 3.dp.toPx(),
                     cap = StrokeCap.Round
                 )
-                drawLine(
-                    color = incomeColor,
-                    start = incomeOffsets[i],
-                    end = incomeOffsets[i + 1],
-                    strokeWidth = 3.dp.toPx(),
-                    cap = StrokeCap.Round
-                )
+
             }
             points.forEachIndexed { index, p ->
                 if (p.expense > 0) {
                     drawCircle(expenseColor, radius = 3.dp.toPx(), center = expenseOffsets[index])
                 }
-                if (p.income > 0) {
-                    drawCircle(incomeColor, radius = 3.dp.toPx(), center = incomeOffsets[index])
-                }
+
             }
         }
         // 底部标签（抽稀显示）
@@ -173,3 +160,7 @@ fun LineChart(
         }
     }
 }
+
+@Composable
+fun LineChart(points: List<ChartPoint>, expenseColor: Color, incomeColor: Color, modifier: Modifier=Modifier) =
+    ExpenseTrendChart(points,expenseColor,incomeColor,modifier)

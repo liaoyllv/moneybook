@@ -11,6 +11,8 @@ import com.andersonlin.moneybook.util.endEpochDay
 import com.andersonlin.moneybook.util.fullDateLabel
 import com.andersonlin.moneybook.util.monthLabel
 import com.andersonlin.moneybook.util.startEpochDay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -64,7 +66,14 @@ data class StatsUiState(
     val chartHasData: Boolean = false,
     val calendarMonth: YearMonth = YearMonth.now(),
     val calendarDays: List<CalendarDay> = emptyList(),
-    val prevTotal: Long? = null
+    val prevTotal: Long? = null,
+    val comparisonLabel: String = "",
+    val currentRecords: List<InsightRecord> = emptyList(),
+    val previousRecords: List<InsightRecord> = emptyList(),
+    val categoryNames: Map<Long,String> = emptyMap(),
+    val categoryMetrics: List<ExpenseMetric> = emptyList(),
+    val anomalies: List<ExpenseAnomaly> = emptyList(),
+    val monthComparison: List<DayComparison> = emptyList()
 ) {
     val typeLabel: String
         get() = when (type) {
@@ -108,76 +117,100 @@ class StatsViewModel(
     private val type = MutableStateFlow(TYPE_EXPENSE)
     private val chartType = MutableStateFlow(CHART_PIE)
 
-    val uiState: StateFlow<StatsUiState> = combine(
-        combine(scale, anchor, type, chartType, ledgerRepository.activeLedgerId) { s, a, t, c, l ->
-            StatsQuery(s, a, t, c, l)
+    private val recordsFlow = ledgerRepository.activeLedgerId
+        .flatMapLatest { billRepository.getAllBills(it) }
+        .map { bills ->
+            bills.map {
+                InsightRecord(it.id, it.categoryId, it.amountCents, it.dateEpochDay, it.type, it.note, it.tags)
+            }
+        }
+        .flowOn(Dispatchers.Default)
+
+    private val baseStateFlow = combine(
+        combine(scale, anchor, type, ledgerRepository.activeLedgerId) { s, a, t, l ->
+            StatsQuery(s, a, t, CHART_PIE, l)
         }
             .flatMapLatest { q ->
-                val range = rangeFor(q.scale, q.anchor)
+                val window = insightWindow(q.scale, q.anchor, false)
+                val range = StatsRange("${LocalDate.ofEpochDay(window.start)} ~ ${LocalDate.ofEpochDay(window.end)}", window.start, window.end)
                 // 图表窗口（柱状/趋势共用）：年维度用逐月聚合，其余用逐日聚合
                 val year = q.anchor.year
-                val (prevStart, prevEnd) = prevRangeFor(q.scale, q.chartType, q.anchor)
+                val ym = YearMonth.from(q.anchor)
+                val queryStart = minOf(dailyStart(q), ym.startEpochDay())
+                val queryEnd = maxOf(dailyEnd(q), ym.endEpochDay())
                 combine(
-                    billRepository.getCategoryStats(q.ledgerId, q.type, range.startDay, range.endDay),
                     billRepository.getMonthlyTotals(
                         q.ledgerId,
                         LocalDate.of(year, 1, 1).toEpochDay(),
                         LocalDate.of(year, 12, 31).toEpochDay()
                     ),
-                    billRepository.getDailyTotals(q.ledgerId, dailyStart(q), dailyEnd(q)),
-                    billRepository.getMonthSummary(q.ledgerId, prevStart, prevEnd)
-                ) { pie, monthly, daily, prevSums ->
-                    QueryResult(range, q, pie, monthly, daily, prevSums)
+                    billRepository.getDailyTotals(q.ledgerId, queryStart, queryEnd)
+                ) { monthly, daily ->
+                    Pair(range to window, Pair(monthly, daily) to q)
                 }
             },
+        recordsFlow,
         categoryRepository.getAllCategories()
-    ) { result, categories ->
+    ) { (meta, payload), records, categories ->
+        val (range, window) = meta
+        val (totals, q) = payload
+        val (monthly, daily) = totals
+        val result = QueryResult(range, q, monthly, daily, window, records)
         val categoryMap = categories.associateBy { it.id }
-        val slices = result.sums
-            .mapNotNull { sum -> categoryMap[sum.categoryId]?.let { StatSlice(it, sum.total) } }
-            .sortedByDescending { it.total }
+        val current=result.records.filter { it.day in result.window.start..result.window.end && (result.query.type==-1 || it.type==result.query.type) }
+        val previous=result.records.filter { it.day in result.window.previousStart..result.window.previousEnd && (result.query.type==-1 || it.type==result.query.type) }
+        val slices = current.groupBy { it.categoryId }.mapNotNull { (id, records) ->
+            categoryMap[id]?.let { StatSlice(it,records.sumOf { r -> r.amount }) }
+        }.sortedByDescending { it.total }
 
         val points = buildChartPoints(result)
 
         val today = LocalDate.now()
-        val canGoNext = if (chartType.value == CHART_CALENDAR) {
-            YearMonth.from(anchor.value) < YearMonth.now()
-        } else {
-            when (scale.value) {
-                SCALE_DAY -> anchor.value < today
-                SCALE_WEEK -> anchor.value
-                    .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-                    .plusDays(6) < today
-                SCALE_MONTH -> YearMonth.from(anchor.value) < YearMonth.now()
-                SCALE_YEAR -> anchor.value.year < today.year
-                else -> false
-            }
+        val canGoNext = when (result.query.scale) {
+            SCALE_DAY -> result.query.anchor < today
+            SCALE_WEEK -> result.query.anchor
+                .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+                .plusDays(6) < today
+            SCALE_MONTH -> YearMonth.from(result.query.anchor) < YearMonth.now()
+            SCALE_YEAR -> result.query.anchor.year < today.year
+            else -> false
         }
 
-        val prevTotal = when (result.query.type) {
-            TYPE_INCOME -> result.prevSums.firstOrNull { it.type == Bill.TYPE_INCOME }?.total
-            TYPE_EXPENSE -> result.prevSums.firstOrNull { it.type == Bill.TYPE_EXPENSE }?.total
-            else -> result.prevSums.sumOf { it.total }.takeIf { result.prevSums.isNotEmpty() }
-        }
+        val prevTotal = previous.takeIf { it.isNotEmpty() }?.sumOf { it.amount }
 
         StatsUiState(
-            scale = scale.value,
+            scale = result.query.scale,
             label = result.range.label,
             type = result.query.type,
             chartType = result.query.chartType,
             slices = slices,
-            total = slices.sumOf { it.total },
+            total = current.sumOf { it.amount },
             canGoNext = canGoNext,
             chartPoints = points,
             chartWindowLabel = chartWindowLabel(result.query),
             chartHasData = points.any { it.expense > 0 || it.income > 0 },
-            calendarMonth = YearMonth.from(anchor.value),
+            calendarMonth = YearMonth.from(result.query.anchor),
             calendarDays = buildCalendarDays(result),
-            prevTotal = prevTotal
+            prevTotal = prevTotal,
+            comparisonLabel=result.window.comparisonLabel,
+            currentRecords=current, previousRecords=previous,
+            categoryNames=categoryMap.mapValues { it.value.name },
+            categoryMetrics=expenseMetrics(current,previous) { (categoryMap[it.categoryId]?.name ?: "未知分类") + if(result.query.type==-1 && it.type==1) "（收入）" else "" },
+            anomalies=expenseAnomalies(current,result.records),
+            monthComparison=compareExpenseMonths(result.records,YearMonth.from(result.query.anchor))
         )
+    }.flowOn(Dispatchers.Default)
+
+    val uiState: StateFlow<StatsUiState> = combine(baseStateFlow, chartType) { base, c ->
+        val canGoNext = if (c == CHART_CALENDAR || c == CHART_BAR) {
+            base.calendarMonth < YearMonth.now()
+        } else {
+            base.canGoNext
+        }
+        base.copy(chartType = c, canGoNext = canGoNext)
     }.stateIn(
         scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5_000),
+        started = SharingStarted.Eagerly,
         initialValue = StatsUiState()
     )
 
@@ -186,6 +219,7 @@ class StatsViewModel(
     }
 
     fun setChartType(chartType: Int) {
+        if(chartType==CHART_BAR || chartType==CHART_LINE) type.value=TYPE_EXPENSE
         this.chartType.value = chartType
     }
 
@@ -201,7 +235,7 @@ class StatsViewModel(
 
     private fun move(delta: Int) {
         val a = anchor.value
-        anchor.value = when (scale.value) {
+        anchor.value = if(chartType.value==CHART_CALENDAR || chartType.value==CHART_BAR) a.plusMonths(delta.toLong()) else when (scale.value) {
             SCALE_DAY -> a.plusDays(delta.toLong())
             SCALE_WEEK -> a.plusWeeks(delta.toLong())
             SCALE_MONTH -> a.plusMonths(delta.toLong())
@@ -211,26 +245,6 @@ class StatsViewModel(
     }
 
     // ---- 图表窗口 ----
-
-    /** 上一周期区间（同比环比用）：日→昨日，周→上周，月→上月，年→去年，日历→上月 */
-    private fun prevRangeFor(scale: Int, chartType: Int, anchor: LocalDate): Pair<Long, Long> {
-        return when {
-            chartType == CHART_CALENDAR ->
-                YearMonth.from(anchor).minusMonths(1).let { it.startEpochDay() to it.endEpochDay() }
-            scale == SCALE_DAY ->
-                anchor.minusDays(1).toEpochDay() to anchor.minusDays(1).toEpochDay()
-            scale == SCALE_WEEK -> {
-                val monday = anchor.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).minusWeeks(1)
-                monday.toEpochDay() to monday.plusDays(6).toEpochDay()
-            }
-            scale == SCALE_MONTH ->
-                YearMonth.from(anchor).minusMonths(1).let { it.startEpochDay() to it.endEpochDay() }
-            else -> {
-                val y = anchor.year - 1
-                LocalDate.of(y, 1, 1).toEpochDay() to LocalDate.of(y, 12, 31).toEpochDay()
-            }
-        }
-    }
 
     private fun dailyStart(q: StatsQuery): Long = when {
         q.chartType == CHART_CALENDAR -> YearMonth.from(q.anchor).startEpochDay()
@@ -330,48 +344,13 @@ private data class StatsQuery(
 private data class QueryResult(
     val range: StatsRange,
     val query: StatsQuery,
-    val sums: List<com.andersonlin.moneybook.data.db.BillDao.CategorySum>,
     val monthly: List<com.andersonlin.moneybook.data.db.BillDao.MonthlyTotal>,
     val daily: List<com.andersonlin.moneybook.data.db.BillDao.DailyTotal>,
-    val prevSums: List<com.andersonlin.moneybook.data.db.BillDao.MonthSum>
+    val window: InsightWindow,
+    val records: List<InsightRecord>
 )
 
 private fun ymKey(year: Int, month: Int): String = "%04d-%02d".format(year, month)
 
 private fun dayKey(year: Int, month: Int, day: Int): String =
     "%04d-%02d-%02d".format(year, month, day)
-
-/** 根据维度与锚点日期计算饼图统计区间（闭区间 epochDay） */
-private fun rangeFor(scale: Int, anchor: LocalDate): StatsRange = when (scale) {
-    StatsViewModel.SCALE_DAY -> StatsRange(
-        label = fullDateLabel(anchor.toEpochDay()),
-        startDay = anchor.toEpochDay(),
-        endDay = anchor.toEpochDay()
-    )
-    StatsViewModel.SCALE_WEEK -> {
-        val monday = anchor.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-        val sunday = monday.plusDays(6)
-        StatsRange(
-            label = "${monday.monthValue}月${monday.dayOfMonth}日 - " +
-                "${sunday.monthValue}月${sunday.dayOfMonth}日",
-            startDay = monday.toEpochDay(),
-            endDay = sunday.toEpochDay()
-        )
-    }
-    StatsViewModel.SCALE_MONTH -> {
-        val ym = YearMonth.from(anchor)
-        StatsRange(
-            label = monthLabel(ym),
-            startDay = ym.startEpochDay(),
-            endDay = ym.endEpochDay()
-        )
-    }
-    else -> {
-        val year = anchor.year
-        StatsRange(
-            label = "${year}年",
-            startDay = LocalDate.of(year, 1, 1).toEpochDay(),
-            endDay = LocalDate.of(year, 12, 31).toEpochDay()
-        )
-    }
-}

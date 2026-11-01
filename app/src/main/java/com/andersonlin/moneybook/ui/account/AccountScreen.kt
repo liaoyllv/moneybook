@@ -22,6 +22,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -65,6 +67,7 @@ fun AccountScreen(
 ) {
     val accounts by viewModel.accounts.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    var editing by remember { mutableStateOf<Account?>(null) }
     var showAddDialog by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<Account?>(null) }
 
@@ -103,7 +106,7 @@ fun AccountScreen(
         ) {
             item(key = "hint") {
                 Text(
-                    text = "每笔账单可归属一个账户，删除账户后其账单会自动转移到其它账户。",
+                    text = "点按账户名称可编辑名称和备注，使用箭头调整顺序。删除后账单转移到其它账户。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.outline,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
@@ -118,11 +121,15 @@ fun AccountScreen(
                 ) {
                     CategoryIconBadge(account.icon, size = 40.dp)
                     Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f).clickable { editing=account }) {
                     Text(
                         text = account.name,
                         style = MaterialTheme.typography.bodyLarge,
-                        modifier = Modifier.weight(1f)
                     )
+                    if(account.note.isNotBlank()) Text(account.note,style=MaterialTheme.typography.bodySmall)
+                    }
+                    IconButton(onClick={ viewModel.move(account,-1) },enabled=accounts.firstOrNull()?.id!=account.id) { Icon(Icons.Filled.ArrowUpward,contentDescription="上移账户") }
+                    IconButton(onClick={ viewModel.move(account,1) },enabled=accounts.lastOrNull()?.id!=account.id) { Icon(Icons.Filled.ArrowDownward,contentDescription="下移账户") }
                     if (account.isDefault) {
                         Text(
                             text = "默认",
@@ -148,11 +155,18 @@ fun AccountScreen(
         AddAccountDialog(
             existing = accounts,
             onDismiss = { showAddDialog = false },
-            onConfirm = { name, icon ->
-                viewModel.addAccount(name, icon)
+            onConfirm = { name, icon, note ->
+                viewModel.addAccount(name, icon, note)
                 showAddDialog = false
             }
         )
+    }
+
+    editing?.let { account ->
+        AddAccountDialog(existing=accounts.filter { it.id!=account.id }, initial=account,
+            onDismiss={ editing=null }, onConfirm={ name,icon,note ->
+                viewModel.updateAccount(account,name,icon,note); editing=null
+            })
     }
 
     pendingDelete?.let { account ->
@@ -178,14 +192,16 @@ fun AccountScreen(
 private fun AddAccountDialog(
     existing: List<Account>,
     onDismiss: () -> Unit,
-    onConfirm: (name: String, icon: String) -> Unit
+    initial: Account? = null,
+    onConfirm: (name: String, icon: String, note: String) -> Unit
 ) {
-    var name by remember { mutableStateOf("") }
-    var icon by remember { mutableStateOf("💵") }
+    var name by remember { mutableStateOf(initial?.name ?: "") }
+    var note by remember { mutableStateOf(initial?.note ?: "") }
+    var icon by remember { mutableStateOf(initial?.icon ?: "💵") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("添加账户") },
+        title = { Text(if(initial==null) "添加账户" else "编辑账户") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 OutlinedTextField(
@@ -195,6 +211,7 @@ private fun AddAccountDialog(
                     singleLine = true
                 )
                 Spacer(Modifier.height(12.dp))
+                OutlinedTextField(value=note,onValueChange={ note=it.take(200) }, label={ Text("账户备注") })
                 Text("选择图标", style = MaterialTheme.typography.labelMedium)
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -228,7 +245,7 @@ private fun AddAccountDialog(
             TextButton(onClick = {
                 if (name.isBlank()) return@TextButton
                 if (existing.any { it.name == name.trim() }) return@TextButton
-                onConfirm(name, icon)
+                onConfirm(name, icon, note)
             }) { Text("确定") }
         },
         dismissButton = {

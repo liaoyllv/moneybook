@@ -55,6 +55,11 @@ class LedgerViewModel(
         }
     }
 
+    fun rename(id: Long, name: String) { viewModelScope.launch {
+        runCatching { ledgerRepository.rename(id,name) }.onSuccess { emit(LedgerEvent.ShowMessage("账本名称已修改")) }
+            .onFailure { emit(LedgerEvent.ShowMessage(it.message ?: "修改失败")) }
+    } }
+
     fun setActive(id: Long) {
         viewModelScope.launch {
             ledgerRepository.setActiveLedger(id)

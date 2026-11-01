@@ -42,6 +42,7 @@ object ChartBitmapRenderer {
         val title = when (state.chartType) {
             StatsViewModel.CHART_PIE -> "${state.label} · 分类占比"
             StatsViewModel.CHART_CALENDAR -> "${state.calendarMonth.year}年${state.calendarMonth.monthValue}月 · 日历"
+            StatsViewModel.CHART_BAR -> "${state.calendarMonth} 同日支出对比"
             else -> state.chartWindowLabel
         }
         canvas.drawText(title, 48f, 84f, titlePaint)
@@ -49,17 +50,59 @@ object ChartBitmapRenderer {
             StatsViewModel.CHART_PIE ->
                 (if (state.type == StatsViewModel.TYPE_ALL) "总流水" else "总${state.typeLabel}") +
                     "  " + com.andersonlin.moneybook.util.formatCents(state.total)
-            else -> "支出(红)  收入(绿)"
+            StatsViewModel.CHART_BAR -> "上方 ${state.calendarMonth} / 下方 ${state.calendarMonth.minusMonths(1)} · 共用刻度（元）"
+            StatsViewModel.CHART_LINE -> "支出趋势（元）"
+            else -> state.typeLabel
         }
         canvas.drawText(subTitle, 48f, 140f, subPaint)
 
         when (state.chartType) {
             StatsViewModel.CHART_PIE -> drawPie(canvas, state, width, height)
             StatsViewModel.CHART_CALENDAR -> drawCalendar(canvas, state, width, height)
-            StatsViewModel.CHART_BAR -> drawBars(canvas, state, width, height)
-            else -> drawLines(canvas, state, width, height)
+            StatsViewModel.CHART_BAR -> drawComparison(canvas, state, width, height)
+            else -> drawLines(canvas, state.copy(chartPoints=state.chartPoints.map {it.copy(income=0)}), width, height)
         }
         return bitmap
+    }
+
+    private fun drawComparison(canvas: Canvas, state: StatsUiState, w: Int, h: Int) {
+        val rows = state.monthComparison
+        if (rows.isEmpty()) return
+        val max = rows.maxOf { maxOf(it.current ?: 0L, it.previous ?: 0L) }.coerceAtLeast(1)
+        val step = (w - 96f) / rows.size
+        val center = h / 2f
+        val bandHalf = 24f
+        val half = (h - 440f) / 2f
+        val scalePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = SUBTEXT; textSize = 28f }
+        canvas.drawText("统一刻度：单日最高 ¥" + com.andersonlin.moneybook.util.formatCents(max), 48f, 190f, scalePaint)
+
+        val bandPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFF0F4EF.toInt() }
+        canvas.drawRect(48f, center - bandHalf, w - 48f, center + bandHalf, bandPaint)
+        val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = SUBTEXT }
+        canvas.drawLine(48f, center - bandHalf, w - 48f, center - bandHalf, linePaint)
+        canvas.drawLine(48f, center + bandHalf, w - 48f, center + bandHalf, linePaint)
+
+        val expPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = EXPENSE }
+        val tertPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = TERTIARY }
+        val datePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = TEXT; textSize = 22f; textAlign = Paint.Align.CENTER }
+        val dateY = center + 8f
+
+        rows.forEachIndexed { i, row ->
+            val x = 48f + i * step
+            val barW = step * 0.65f
+            row.current?.takeIf { it > 0 }?.let {
+                canvas.drawRect(x, center - bandHalf - 4f - half * it / max, x + barW, center - bandHalf - 4f, expPaint)
+            }
+            row.previous?.takeIf { it > 0 }?.let {
+                canvas.drawRect(x, center + bandHalf + 4f, x + barW, center + bandHalf + 4f + half * it / max, tertPaint)
+            }
+            val isDrawDay = row.day == 1 || (row.day % 5 == 0 && (rows.size - row.day) >= 2) || row.day == rows.size
+            if (isDrawDay) {
+                canvas.drawText(row.day.toString(), x + barW / 2, dateY, datePaint)
+            }
+        }
+        val subPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = SUBTEXT; textSize = 28f }
+        canvas.drawText("同日对齐；未到或不存在的日期留空", 48f, h - 40f, subPaint)
     }
 
     private fun drawPie(canvas: Canvas, state: StatsUiState, w: Int, h: Int) {
@@ -157,12 +200,10 @@ object ChartBitmapRenderer {
         val iOffsets = offsets { it.income }
         for (i in 0 until eOffsets.size - 1) {
             canvas.drawLine(eOffsets[i].first, eOffsets[i].second, eOffsets[i + 1].first, eOffsets[i + 1].second, expPaint)
-            canvas.drawLine(iOffsets[i].first, iOffsets[i].second, iOffsets[i + 1].first, iOffsets[i + 1].second, incPaint)
         }
         val dot = Paint(Paint.ANTI_ALIAS_FLAG)
         points.forEachIndexed { index, p ->
             if (p.expense > 0) { dot.color = EXPENSE; canvas.drawCircle(eOffsets[index].first, eOffsets[index].second, 10f, dot) }
-            if (p.income > 0) { dot.color = INCOME; canvas.drawCircle(iOffsets[index].first, iOffsets[index].second, 10f, dot) }
         }
         val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = SUBTEXT; textSize = 28f }
         val every = if (points.size >= 25) 5 else if (points.size >= 15) 3 else 2

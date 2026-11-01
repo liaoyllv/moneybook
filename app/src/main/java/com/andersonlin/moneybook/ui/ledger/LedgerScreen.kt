@@ -69,6 +69,8 @@ fun LedgerScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    var editing by remember { mutableStateOf<Ledger?>(null) }
+    var renameText by remember {mutableStateOf("")}
     var showAddDialog by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<PendingLedgerDelete?>(null) }
 
@@ -119,6 +121,7 @@ fun LedgerScreen(
                     ledger = ledger,
                     isActive = ledger.id == state.activeLedgerId,
                     onSelect = { viewModel.setActive(ledger.id) },
+                    onRename={ editing=ledger;renameText=ledger.name },
                     onDelete = if (ledger.id == Ledger.DEFAULT_ID) null
                     else ({ viewModel.requestDelete(ledger) })
                 )
@@ -127,6 +130,12 @@ fun LedgerScreen(
         }
     }
 
+    editing?.let { ledger ->
+        AlertDialog(onDismissRequest={editing=null},title={Text("修改账本名称")},
+            text={OutlinedTextField(value=renameText,onValueChange={renameText=it.take(20)},label={Text("账本名称")},singleLine=true)},
+            confirmButton={TextButton(onClick={viewModel.rename(ledger.id,renameText);editing=null},enabled=renameText.isNotBlank() && state.ledgers.none {it.id!=ledger.id && it.name==renameText.trim()}){Text("保存")}},
+            dismissButton={TextButton(onClick={editing=null}){Text("取消")}})
+    }
     if (showAddDialog) {
         AddLedgerDialog(
             existing = state.ledgers,
@@ -170,6 +179,7 @@ private fun LedgerRow(
     ledger: Ledger,
     isActive: Boolean,
     onSelect: () -> Unit,
+    onRename: () -> Unit,
     onDelete: (() -> Unit)?
 ) {
     Row(
@@ -187,6 +197,7 @@ private fun LedgerRow(
             color = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.weight(1f)
         )
+        TextButton(onClick=onRename) {Text("改名")}
         RadioButton(selected = isActive, onClick = onSelect)
         if (onDelete != null) {
             IconButton(onClick = onDelete) {

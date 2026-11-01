@@ -1,9 +1,12 @@
 package com.andersonlin.moneybook.data.backup
 
 import android.content.Context
+import com.andersonlin.moneybook.data.model.withSuggestedIcon
 import android.net.Uri
 import androidx.room.withTransaction
 import com.andersonlin.moneybook.data.db.AppDatabase
+import com.andersonlin.moneybook.data.model.Budget
+import com.andersonlin.moneybook.data.model.CategoryBudget
 import com.andersonlin.moneybook.data.model.Account
 import com.andersonlin.moneybook.data.model.Bill
 import com.andersonlin.moneybook.data.model.Category
@@ -69,7 +72,7 @@ class BackupManager(
     class BackupPasswordException : Exception("应用锁密码不匹配或文件已损坏")
 
     /** 构建完整备份 JSON（全部账本、分类、账户、预算、周期账单、存钱目标、账单） */
-    private suspend fun buildBackupJson(): Pair<String, Int> {
+    private suspend fun buildBackupJson(): Pair<String, Int> = database.withTransaction {
         val bills = database.billDao().getAllSnapshot()
         val categories = database.categoryDao().getAllSnapshot()
         val accounts = database.accountDao().getAllSnapshot()
@@ -79,8 +82,18 @@ class BackupManager(
 
         val root = JSONObject()
         root.put("app", "moneybook")
-        root.put("version", 2)
+        root.put("version", 3)
         root.put("exportedAt", LocalDateTime.now().toString())
+        root.put("budgets", JSONArray().apply {
+            database.budgetDao().getAllSnapshot().forEach { b -> put(JSONObject().apply {
+                put("year", b.year); put("month", b.month); put("amountCents", b.amountCents)
+            }) }
+        })
+        root.put("categoryBudgets", JSONArray().apply {
+            database.categoryBudgetDao().getAllSnapshot().forEach { b -> put(JSONObject().apply {
+                put("categoryId", b.categoryId); put("year", b.year); put("month", b.month); put("amountCents", b.amountCents)
+            }) }
+        })
         root.put("categories", JSONArray().apply {
             categories.forEach { c ->
                 put(JSONObject().apply {
@@ -92,7 +105,7 @@ class BackupManager(
         root.put("accounts", JSONArray().apply {
             accounts.forEach { a ->
                 put(JSONObject().apply {
-                    put("id", a.id); put("name", a.name); put("icon", a.icon)
+                    put("id", a.id); put("name", a.name); put("icon", a.icon); put("note", a.note)
                     put("isDefault", a.isDefault); put("sortOrder", a.sortOrder)
                 })
             }
@@ -132,13 +145,13 @@ class BackupManager(
                     put("id", b.id); put("type", b.type); put("amountCents", b.amountCents)
                     put("categoryId", b.categoryId); put("accountId", b.accountId)
                     put("ledgerId", b.ledgerId); put("note", b.note)
-                    put("dateEpochDay", b.dateEpochDay); put("createdAt", b.createdAt)
+                    put("dateEpochDay", b.dateEpochDay); put("createdAt", b.createdAt); put("tags", b.tags)
                     put("attachmentUri", b.attachmentUri ?: JSONObject.NULL)
                     put("attachmentMime", b.attachmentMime ?: JSONObject.NULL)
                 })
             }
         })
-        return root.toString(2) to bills.size
+        root.toString(2) to bills.size
     }
 
     /** 导出明文 JSON（兼容旧版） */
@@ -426,11 +439,11 @@ class BackupManager(
     /** 解析 JSON 并在事务内整体覆盖恢复，返回恢复的账单列表 */
     private suspend fun restoreFromJson(text: String): List<Bill> {
         val root = JSONObject(text)
-        if (root.optString("app") != "moneybook" && !root.has("bills")) {
+        if (root.optString("app") != "moneybook" || !root.has("bills")) {
             error("不是有效的记账本备份文件")
         }
 
-        val categories = parseCategories(root.getJSONArray("categories"))
+        val categories = parseCategories(root.getJSONArray("categories")).map { it.withSuggestedIcon() }
         val accounts = parseAccounts(root.getJSONArray("accounts"))
         // 旧备份无 ledgers：补默认账本
         val ledgers = if (root.has("ledgers")) {
@@ -460,7 +473,21 @@ class BackupManager(
             "备份文件损坏：周期账单引用无效"
         }
 
+        val budgets = root.optJSONArray("budgets")?.let { a -> (0 until a.length()).map {
+            val o = a.getJSONObject(it)
+            Budget(year = o.getInt("year"), month = o.getInt("month"), amountCents = o.getLong("amountCents"))
+        } } ?: emptyList()
+        val categoryBudgets = root.optJSONArray("categoryBudgets")?.let { a -> (0 until a.length()).map {
+            val o = a.getJSONObject(it)
+            CategoryBudget(categoryId = o.getLong("categoryId"), year = o.getInt("year"), month = o.getInt("month"), amountCents = o.getLong("amountCents"))
+        } } ?: emptyList()
+        require(budgets.all { it.month in 1..12 && it.amountCents >= 0 } && categoryBudgets.all {
+            it.month in 1..12 && it.amountCents >= 0 && it.categoryId in categoryIds
+        }) { "备份中的预算数据无效" }
+
         database.withTransaction {
+            database.categoryBudgetDao().deleteAll()
+            database.budgetDao().deleteAll()
             database.billDao().deleteAll()
             database.recurringBillDao().deleteAll()
             database.goalDao().deleteAll()
@@ -474,6 +501,8 @@ class BackupManager(
             database.billDao().insertAll(bills)
             database.recurringBillDao().insertAll(recurring)
             database.goalDao().insertAll(goals)
+            budgets.forEach { database.budgetDao().upsert(it) }
+            categoryBudgets.forEach { database.categoryBudgetDao().upsert(it) }
         }
         return bills
     }
@@ -488,7 +517,7 @@ class BackupManager(
 
             val sb = StringBuilder()
             sb.append('\uFEFF') // BOM：让 Excel 正确识别 UTF-8 中文
-            sb.append("日期,类型,分类,账户,金额,备注\n")
+            sb.append("日期,类型,分类,账户,金额,备注,标签\n")
             bills.forEach { b ->
                 val date = LocalDate.ofEpochDay(b.dateEpochDay).toString()
                 val type = if (b.type == Bill.TYPE_EXPENSE) "支出" else "收入"
@@ -496,7 +525,7 @@ class BackupManager(
                 val account = accounts[b.accountId]?.name ?: ""
                 val amount = (if (b.type == Bill.TYPE_EXPENSE) "-" else "+") +
                     formatCentsPlain(b.amountCents)
-                val line = listOf(date, type, category, account, amount, b.note)
+                val line = listOf(date, type, category, account, amount, b.note, b.tags.replace("\n", " / "))
                     .joinToString(",") { csvEscape(it) }
                 sb.append(line).append('\n')
             }
@@ -544,6 +573,7 @@ class BackupManager(
                     id = o.optLong("id", 0L),
                     name = o.getString("name"),
                     icon = o.optString("icon", "💵"),
+                    note = o.optString("note", ""),
                     isDefault = o.optBoolean("isDefault", false),
                     sortOrder = o.optInt("sortOrder", 0)
                 )
@@ -583,6 +613,9 @@ class BackupManager(
                     ledgerId = o.optLong("ledgerId", Bill.DEFAULT_LEDGER_ID),
                     note = o.optString("note", ""),
                     dateEpochDay = o.getLong("dateEpochDay"),
+                    tags = o.optString("tags", ""),
+                    attachmentUri = o.optString("attachmentUri").takeUnless { it.isBlank() || it == "null" },
+                    attachmentMime = o.optString("attachmentMime").takeUnless { it.isBlank() || it == "null" },
                     createdAt = o.optLong("createdAt", System.currentTimeMillis())
                 )
             )

@@ -4,7 +4,11 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.graphics.Bitmap
 import androidx.compose.foundation.background
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,6 +30,9 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.PieChart
 import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -52,6 +59,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -141,91 +150,77 @@ fun StatsScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            // 图表类型：分类占比 / 收支对比 / 趋势 / 日历
-            SingleChoiceSegmentedButtonRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-            ) {
-                listOf(
-                    StatsViewModel.CHART_PIE to "占比",
-                    StatsViewModel.CHART_BAR to "对比",
-                    StatsViewModel.CHART_LINE to "趋势",
-                    StatsViewModel.CHART_CALENDAR to "日历"
-                ).forEachIndexed { index, (value, labelText) ->
-                    SegmentedButton(
-                        selected = state.chartType == value,
-                        onClick = { viewModel.setChartType(value) },
-                        shape = SegmentedButtonDefaults.itemShape(index = index, count = 4),
-                        label = { Text(labelText) }
-                    )
+            Row(Modifier.fillMaxWidth().padding(horizontal=12.dp),horizontalArrangement=Arrangement.spacedBy(4.dp)) {
+                listOf("占比","对比","趋势","日历").forEachIndexed { i,label ->
+                    TextButton(onClick={viewModel.setChartType(i)},modifier=Modifier.weight(1f),
+                        colors=ButtonDefaults.textButtonColors(containerColor=if(state.chartType==i) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)) {
+                        Text(label,maxLines=1,style=MaterialTheme.typography.labelLarge)
+                    }
                 }
             }
-
-            // 类型：饼图与日历使用（柱状/趋势固定展示收支双系列）
-            if (state.chartType == StatsViewModel.CHART_PIE ||
-                state.chartType == StatsViewModel.CHART_CALENDAR
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                SingleChoiceSegmentedButtonRow(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp)
-                ) {
-                    listOf(
-                        StatsViewModel.TYPE_EXPENSE to "支出",
-                        StatsViewModel.TYPE_INCOME to "收入",
-                        StatsViewModel.TYPE_ALL to "全部"
-                    ).forEachIndexed { index, (value, labelText) ->
-                        SegmentedButton(
-                            selected = state.type == value,
-                            onClick = { viewModel.setType(value) },
-                            shape = SegmentedButtonDefaults.itemShape(index = index, count = 3),
-                            label = { Text(labelText) }
+                val isMonthOnly = state.chartType == StatsViewModel.CHART_CALENDAR || state.chartType == StatsViewModel.CHART_BAR
+                var periodMenu by remember { mutableStateOf(false) }
+                Box {
+                    TextButton(onClick = { periodMenu = true }) {
+                        Text(
+                            (if (isMonthOnly) "月" else listOf("日", "周", "月", "年")[state.scale]) + " ▾",
+                            style = MaterialTheme.typography.labelMedium
                         )
                     }
-                }
-            }
-
-            // 时间维度：饼图/柱状/趋势显示（日历自带月导航）
-            if (state.chartType != StatsViewModel.CHART_CALENDAR) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(onClick = viewModel::prev) {
-                        Icon(Icons.Filled.ChevronLeft, contentDescription = "上一个")
-                    }
-                    Text(
-                        text = state.label,
-                        style = MaterialTheme.typography.titleSmall,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.weight(1f)
-                    )
-                    IconButton(onClick = viewModel::next, enabled = state.canGoNext) {
-                        Icon(Icons.Filled.ChevronRight, contentDescription = "下一个")
+                    DropdownMenu(expanded = periodMenu, onDismissRequest = { periodMenu = false }) {
+                        listOf("按日", "按周", "按月", "按年").forEachIndexed { i, v ->
+                            DropdownMenuItem(
+                                text = { Text(v) },
+                                onClick = {
+                                    viewModel.setScale(i)
+                                    if (isMonthOnly) viewModel.setChartType(0)
+                                    periodMenu = false
+                                }
+                            )
+                        }
                     }
                 }
-            }
-
-            // 同比环比（较上一周期）
-            val prevTotal = state.prevTotal
-            if (prevTotal != null && prevTotal > 0 && state.total > 0) {
-                val change = (state.total - prevTotal) * 100.0 / prevTotal
+                IconButton(onClick = viewModel::prev) {
+                    Icon(Icons.Filled.ChevronLeft, contentDescription = "上一期")
+                }
                 Text(
-                    text = "较上一周期 " + (if (change >= 0) "+" else "") +
-                        String.format(Locale.US, "%.1f%%", change),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (change >= 0) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.error
-                    },
-                    modifier = Modifier.padding(horizontal = 16.dp)
+                    text = if (isMonthOnly || state.scale == 2) monthLabel(state.calendarMonth) else state.label,
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f),
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
+                IconButton(onClick = viewModel::next, enabled = state.canGoNext) {
+                    Icon(Icons.Filled.ChevronRight, contentDescription = "下一期")
+                }
+                val hasTypeMenu = state.chartType == 0 || state.chartType == 3
+                if (hasTypeMenu) {
+                    var typeMenu by remember { mutableStateOf(false) }
+                    Box {
+                        TextButton(onClick = { typeMenu = true }) {
+                            Text(state.typeLabel + " ▾", style = MaterialTheme.typography.labelMedium)
+                        }
+                        DropdownMenu(expanded = typeMenu, onDismissRequest = { typeMenu = false }) {
+                            listOf(0 to "支出", 1 to "收入", -1 to "全部").forEach { (type, label) ->
+                                DropdownMenuItem(
+                                    text = { Text(label) },
+                                    onClick = {
+                                        viewModel.setType(type)
+                                        typeMenu = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    Spacer(Modifier.width(56.dp))
+                }
             }
-
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -233,7 +228,7 @@ fun StatsScreen(
             ) {
                 when (state.chartType) {
                     StatsViewModel.CHART_PIE -> PieContent(state)
-                    StatsViewModel.CHART_BAR -> BarContent(state, expenseColor, incomeColor)
+                    StatsViewModel.CHART_BAR -> MonthComparisonContent(state)
                     StatsViewModel.CHART_CALENDAR -> CalendarContent(
                         state,
                         viewModel,
@@ -248,37 +243,86 @@ fun StatsScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PieContent(state: StatsUiState) {
-    if (state.slices.isEmpty()) {
-        EmptyBox("该时间段暂无${state.typeLabel}记录")
-        return
+    var detail by remember { mutableStateOf<Long?>(null) }
+    detail?.let { categoryId ->
+        CategoryInsightDialog(state,categoryId) { detail=null }
     }
-    LazyColumn(Modifier.fillMaxSize()) {
-        item(key = "chart") {
-            Box(
-                modifier = Modifier
+    var showChart by remember {mutableStateOf(false)}
+    var showAnalysis by remember {mutableStateOf(false)}
+    var showDates by remember {mutableStateOf(false)}
+    if (showAnalysis) {
+        ModalBottomSheet(
+            onDismissRequest = { showAnalysis = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false),
+            containerColor = MaterialTheme.colorScheme.surface,
+            scrimColor = BottomSheetDefaults.ScrimColor
+        ) {
+            Column(
+                Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 20.dp),
-                contentAlignment = Alignment.Center
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp)
+                    .navigationBarsPadding()
             ) {
-                DonutChart(
-                    slices = state.slices,
-                    colors = ChartColors,
-                    modifier = Modifier.size(210.dp)
-                )
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Row(
+                    Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
-                        text = if (state.type == StatsViewModel.TYPE_ALL) "总流水" else "总${state.typeLabel}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = formatCents(state.total),
+                        "${state.typeLabel}分析",
                         style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = { showAnalysis = false }) {
+                        Text("关闭", style = MaterialTheme.typography.labelLarge)
+                    }
+                }
+                SpendingInsightSummary(state, true)
+                Spacer(Modifier.height(32.dp))
+            }
+        }
+    }
+    if(showDates) AlertDialog(onDismissRequest={showDates=false},title={Text("比较区间")},text={Text(state.comparisonLabel)},confirmButton={TextButton(onClick={showDates=false}){Text("关闭")}})
+    LazyColumn(Modifier.fillMaxSize()) {
+        item(key="total") {
+            Column(Modifier.fillMaxWidth().padding(horizontal=20.dp,vertical=8.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
+                Text("本期${state.typeLabel}",style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("¥ "+formatCents(state.total),style=MaterialTheme.typography.headlineMedium,fontWeight=FontWeight.SemiBold)
+                Text("${state.currentRecords.size} 笔  ·  单笔均值 ¥${formatCents(if(state.currentRecords.isEmpty()) 0 else state.total/state.currentRecords.size)}",style=MaterialTheme.typography.bodySmall)
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    SuggestionChip(
+                        onClick = { showDates = true },
+                        label = {
+                            Text(
+                                state.prevTotal?.takeIf { it > 0 }?.let {
+                                    "环比 %+.1f%%".format(Locale.ROOT, (state.total - it) * 100.0 / it)
+                                } ?: "上期暂无记录",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        }
+                    )
+                    SuggestionChip(
+                        onClick = { showAnalysis = true },
+                        label = { Text("支出分析 ↗", style = MaterialTheme.typography.labelMedium) }
+                    )
+                    SuggestionChip(
+                        onClick = { showChart = !showChart },
+                        label = { Text(if (showChart) "收起图表" else "占比图 ▾", style = MaterialTheme.typography.labelMedium) }
                     )
                 }
+            }
+        }
+        if(showChart && state.slices.isNotEmpty()) item(key="chart") {
+            Box(Modifier.fillMaxWidth().padding(8.dp),contentAlignment=Alignment.Center) {
+                DonutChart(slices=state.slices,colors=ChartColors,modifier=Modifier.size(160.dp))
             }
         }
         item(key = "legend_header") {
@@ -292,7 +336,8 @@ private fun PieContent(state: StatsUiState) {
             StatLegendRow(
                 slice = slice,
                 color = ChartColors[state.slices.indexOf(slice) % ChartColors.size],
-                total = state.total
+                total = state.total,
+                onClick={ detail=slice.category.id }
             )
         }
         item(key = "bottom_space") { Spacer(Modifier.height(16.dp)) }
@@ -370,13 +415,13 @@ private fun LineContent(state: StatsUiState, expenseColor: Color, incomeColor: C
         }
         item(key = "chart") {
             Column {
-                LineChart(
+                ExpenseTrendChart(
                     points = state.chartPoints,
                     expenseColor = expenseColor,
                     incomeColor = incomeColor,
                     modifier = Modifier.padding(vertical = 16.dp)
                 )
-                ChartLegend(expenseColor, incomeColor)
+                Text("每日支出（元）",style=MaterialTheme.typography.bodySmall,modifier=Modifier.padding(horizontal=16.dp))
             }
         }
         item(key = "bottom_space") { Spacer(Modifier.height(24.dp)) }
@@ -410,26 +455,17 @@ private fun CalendarContent(
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .verticalScroll(androidx.compose.foundation.rememberScrollState())
             .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
-        // 月导航
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = viewModel::prev) {
-                Icon(Icons.Filled.ChevronLeft, contentDescription = "上个月")
-            }
-            Text(
-                text = monthLabel(state.calendarMonth),
-                style = MaterialTheme.typography.titleMedium,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.weight(1f)
-            )
-            IconButton(onClick = viewModel::next, enabled = state.canGoNext) {
-                Icon(Icons.Filled.ChevronRight, contentDescription = "下个月")
-            }
-        }
+        Text(
+            text = when (state.type) {
+                StatsViewModel.TYPE_INCOME -> "本月收入 ¥" + formatCents(state.calendarDays.sumOf { it.income })
+                StatsViewModel.TYPE_ALL -> "本月总流水 ¥" + formatCents(state.calendarDays.sumOf { it.expense + it.income })
+                else -> "本月支出 ¥" + formatCents(state.calendarDays.sumOf { it.expense })
+            },
+            style = MaterialTheme.typography.titleMedium
+        )
         // 图例说明
         Text(
             text = "圆圈大小表示当天金额",
@@ -586,9 +622,9 @@ private fun EmptyBox(title: String) {
 }
 
 @Composable
-private fun StatLegendRow(slice: StatSlice, color: Color, total: Long) {
+private fun StatLegendRow(slice: StatSlice, color: Color, total: Long, onClick: () -> Unit) {
     Row(
-        modifier = Modifier
+        modifier = Modifier.clickable(onClick=onClick)
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically

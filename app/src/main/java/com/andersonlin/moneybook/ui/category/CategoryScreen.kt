@@ -69,6 +69,8 @@ fun CategoryScreen(
 ) {
     val categories by viewModel.categories.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    var mergeSource by remember { mutableStateOf<Category?>(null) }
+    var mergeTarget by remember { mutableStateOf<Category?>(null) }
     var showAddDialog by remember { mutableStateOf(false) }
     var addType by remember { mutableIntStateOf(Bill.TYPE_EXPENSE) }
     var pendingDelete by remember { mutableStateOf<PendingDelete?>(null) }
@@ -127,7 +129,8 @@ fun CategoryScreen(
                 items(expenseCategories, key = { "c${it.id}" }) { category ->
                     CategoryRow(
                         category = category,
-                        onDelete = { viewModel.requestDelete(category) }
+                        onDelete = { viewModel.requestDelete(category) },
+                        onMerge = { mergeSource=category; mergeTarget=null }
                     )
                 }
             }
@@ -154,7 +157,8 @@ fun CategoryScreen(
                 items(incomeCategories, key = { "c${it.id}" }) { category ->
                     CategoryRow(
                         category = category,
-                        onDelete = { viewModel.requestDelete(category) }
+                        onDelete = { viewModel.requestDelete(category) },
+                        onMerge = { mergeSource=category; mergeTarget=null }
                     )
                 }
             }
@@ -173,6 +177,18 @@ fun CategoryScreen(
                 showAddDialog = false
             }
         )
+    }
+
+    mergeSource?.let { source ->
+        AlertDialog(onDismissRequest={ mergeSource=null }, title={ Text("合并「${source.name}」") },
+            text={ Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text("账单、标签及周期账单移到目标分类，同月预算相加。原分类将移除，操作无法直接撤销。")
+                categories.filter { it.id!=source.id && it.type==source.type }.forEach { target ->
+                    TextButton(onClick={ mergeTarget=target }) { Text((if(mergeTarget?.id==target.id) "✓ " else "")+target.icon+" "+target.name) }
+                }
+            } },
+            confirmButton={ TextButton(onClick={ mergeTarget?.let { viewModel.merge(source,it) };mergeSource=null },enabled=mergeTarget!=null) { Text("确认合并") } },
+            dismissButton={ TextButton(onClick={ mergeSource=null }) { Text("取消") } })
     }
 
     pendingDelete?.let { pending ->
@@ -219,7 +235,7 @@ private fun CategorySectionHeader(title: String, onAdd: () -> Unit) {
 }
 
 @Composable
-private fun CategoryRow(category: Category, onDelete: (() -> Unit)?) {
+private fun CategoryRow(category: Category, onDelete: (() -> Unit)?, onMerge: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -233,6 +249,7 @@ private fun CategoryRow(category: Category, onDelete: (() -> Unit)?) {
             style = MaterialTheme.typography.bodyLarge,
             modifier = Modifier.weight(1f)
         )
+        TextButton(onClick=onMerge) { Text("合并") }
         if (category.isDefault) {
             Text(
                 text = "默认",

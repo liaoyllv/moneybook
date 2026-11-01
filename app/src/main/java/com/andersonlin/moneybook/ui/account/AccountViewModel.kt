@@ -31,7 +31,7 @@ class AccountViewModel(
     private val _events = MutableSharedFlow<AccountEvent>()
     val events = _events.asSharedFlow()
 
-    fun addAccount(name: String, icon: String) {
+    fun addAccount(name: String, icon: String, note: String = "") {
         val trimmed = name.trim()
         if (trimmed.isEmpty()) {
             emit(AccountEvent.ShowMessage("账户名称不能为空"))
@@ -43,10 +43,26 @@ class AccountViewModel(
                 _events.emit(AccountEvent.ShowMessage("「$trimmed」账户已存在"))
                 return@launch
             }
-            accountRepository.addAccount(trimmed, icon)
+            accountRepository.addAccount(trimmed, icon, note.trim())
             _events.emit(AccountEvent.ShowMessage("已添加「$trimmed」"))
         }
     }
+
+    fun updateAccount(account: Account, name: String, icon: String, note: String) { viewModelScope.launch {
+        if(name.isBlank() || accounts.value.any { it.id!=account.id && it.name==name.trim() }) {
+            emit(AccountEvent.ShowMessage("名称不能为空或重复")); return@launch
+        }
+        runCatching { accountRepository.update(account.copy(name=name.trim(),icon=icon,note=note.trim())) }
+            .onFailure { emit(AccountEvent.ShowMessage("保存失败")) }
+    } }
+
+    fun move(account: Account, delta: Int) { viewModelScope.launch {
+        val ids=accounts.value.map { it.id }.toMutableList(); val from=ids.indexOf(account.id); val to=from+delta
+        if(from>=0 && to in ids.indices) {
+            ids.add(to,ids.removeAt(from))
+            runCatching { accountRepository.reorder(ids) }.onFailure { emit(AccountEvent.ShowMessage("排序失败，请重试")) }
+        }
+    } }
 
     fun requestDelete(account: Account) {
         if (accounts.value.size <= 1) {

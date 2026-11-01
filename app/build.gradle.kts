@@ -6,6 +6,13 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+tasks.register<JavaExec>("checkInsights") {
+    dependsOn("compileDebugUnitTestKotlin")
+    classpath = files(layout.buildDirectory.dir("tmp/kotlin-classes/debugUnitTest"), layout.buildDirectory.dir("tmp/kotlin-classes/debug")) +
+        configurations.getByName("debugUnitTestRuntimeClasspath")
+    mainClass.set("com.andersonlin.moneybook.ui.stats.SpendingInsightsCheckKt")
+}
+
 // 读取 local.properties（本地文件，不提交到 git）：SDK 路径 + 发布签名
 val localProperties = Properties().apply {
     val file = rootProject.file("local.properties")
@@ -20,8 +27,8 @@ android {
         applicationId = "com.andersonlin.moneybook"
         minSdk = 28
         targetSdk = 34
-        versionCode = 20
-        versionName = "2.0.0"
+        versionCode = 33
+        versionName = "2.1.12"
     }
 
     signingConfigs {

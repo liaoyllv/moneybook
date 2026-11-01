@@ -23,6 +23,12 @@ interface CategoryBudgetDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(budget: CategoryBudget)
 
+    @Query("SELECT * FROM category_budgets")
+    suspend fun getAllSnapshot(): List<CategoryBudget>
+
+    @Query("DELETE FROM category_budgets")
+    suspend fun deleteAll()
+
     @Delete
     suspend fun delete(budget: CategoryBudget)
 

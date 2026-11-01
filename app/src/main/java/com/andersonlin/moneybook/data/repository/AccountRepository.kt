@@ -5,6 +5,7 @@ import com.andersonlin.moneybook.data.db.AccountDao
 import com.andersonlin.moneybook.data.db.AppDatabase
 import com.andersonlin.moneybook.data.model.Account
 import com.andersonlin.moneybook.data.model.Bill
+import kotlinx.coroutines.flow.onEach
 
 /** 账户仓库：增删账户；删除账户时其账单与周期账单自动转移到默认账户（现金） */
 class AccountRepository(
@@ -12,17 +13,33 @@ class AccountRepository(
     private val dao: AccountDao
 ) {
 
-    fun getAllAccounts() = dao.getAllAccounts()
+    @Volatile
+    var cachedAccounts: List<Account> = emptyList()
+        private set
 
-    suspend fun getAllSnapshot(): List<Account> = dao.getAllSnapshot()
+    fun getAllAccounts() = dao.getAllAccounts().onEach { cachedAccounts = it }
+
+    suspend fun getAllSnapshot(): List<Account> = dao.getAllSnapshot().also { cachedAccounts = it }
+
+    suspend fun update(account: Account) = database.withTransaction {
+        val current = requireNotNull(dao.getById(account.id)) { "账户已不存在" }
+        require(dao.getAllSnapshot().none { it.id!=account.id && it.name==account.name }) { "账户名称重复" }
+        dao.update(current.copy(name=account.name,icon=account.icon,note=account.note))
+    }
+
+    suspend fun reorder(ids: List<Long>) = database.withTransaction {
+        val all = dao.getAllSnapshot()
+        require(ids.toSet() == all.map { it.id }.toSet() && ids.size == all.size)
+        ids.forEachIndexed { index, id -> dao.update(all.first { it.id == id }.copy(sortOrder = index + 1)) }
+    }
 
     suspend fun getById(id: Long): Account? = dao.getById(id)
 
     /** 新增账户，排到末尾 */
-    suspend fun addAccount(name: String, icon: String): Long {
+    suspend fun addAccount(name: String, icon: String, note: String = ""): Long {
         val snapshot = dao.getAllSnapshot()
         val maxOrder = snapshot.maxOfOrNull { it.sortOrder } ?: 0
-        return dao.insert(Account(name = name, icon = icon, isDefault = false, sortOrder = maxOrder + 1))
+        return dao.insert(Account(name = name, icon = icon, note = note, isDefault = false, sortOrder = maxOrder + 1))
     }
 
     /**
@@ -37,7 +54,7 @@ class AccountRepository(
         val targetId = if (account.id == Bill.DEFAULT_ACCOUNT_ID) {
             (all.firstOrNull { it.id != account.id } ?: return Result.failure(IllegalStateException("至少需要保留一个账户"))).id
         } else {
-            Bill.DEFAULT_ACCOUNT_ID
+            all.firstOrNull { it.id == Bill.DEFAULT_ACCOUNT_ID }?.id ?: all.first { it.id != account.id }.id
         }
         return runCatching {
             database.withTransaction {

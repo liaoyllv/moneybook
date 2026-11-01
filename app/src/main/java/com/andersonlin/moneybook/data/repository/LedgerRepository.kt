@@ -27,15 +27,22 @@ class LedgerRepository(
 
     private val activeLedgerKey = longPreferencesKey("active_ledger_id")
 
+    @Volatile
+    var cachedActiveLedgerId: Long = Bill.DEFAULT_LEDGER_ID
+        private set
+
     /** 当前活动账本 id（默认 1） */
     val activeLedgerId: Flow<Long> = context.ledgerDataStore.data.map { prefs ->
-        prefs[activeLedgerKey] ?: Bill.DEFAULT_LEDGER_ID
+        (prefs[activeLedgerKey] ?: Bill.DEFAULT_LEDGER_ID).also { cachedActiveLedgerId = it }
     }
 
     suspend fun getActiveLedgerId(): Long =
-        context.ledgerDataStore.data.first()[activeLedgerKey] ?: Bill.DEFAULT_LEDGER_ID
+        (context.ledgerDataStore.data.first()[activeLedgerKey] ?: Bill.DEFAULT_LEDGER_ID).also {
+            cachedActiveLedgerId = it
+        }
 
     suspend fun setActiveLedger(id: Long) {
+        cachedActiveLedgerId = id
         context.ledgerDataStore.edit { it[activeLedgerKey] = id }
     }
 
@@ -44,6 +51,14 @@ class LedgerRepository(
     suspend fun getAllSnapshot(): List<Ledger> = dao.getAllSnapshot()
 
     suspend fun getById(id: Long): Ledger? = dao.getById(id)
+
+    suspend fun rename(id: Long, name: String) = database.withTransaction {
+        val trimmed=name.trim()
+        require(trimmed.isNotEmpty() && trimmed.length<=20) { "名称需为1至20个字" }
+        require(dao.getAllSnapshot().none { it.id!=id && it.name==trimmed }) { "账本名称已存在" }
+        val current=requireNotNull(dao.getById(id)) { "账本不存在" }
+        dao.update(current.copy(name=trimmed))
+    }
 
     /** 新增账本，排到末尾 */
     suspend fun addLedger(name: String, icon: String): Long {

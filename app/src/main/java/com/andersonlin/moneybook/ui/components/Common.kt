@@ -20,18 +20,21 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.andersonlin.moneybook.data.model.Account
 import com.andersonlin.moneybook.data.model.Bill
 import com.andersonlin.moneybook.data.model.Category
@@ -83,14 +86,10 @@ fun BillRow(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false)
                     )
-                    if (bill.attachmentUri != null) {
+                    if (bill.attachmentUri != null && bill.attachmentMime?.startsWith("image/") != true) {
                         Spacer(Modifier.width(6.dp))
                         Icon(
-                            imageVector = if (bill.attachmentMime?.startsWith("image/") == true) {
-                                Icons.Filled.Image
-                            } else {
-                                Icons.Filled.AttachFile
-                            },
+                            imageVector = Icons.Filled.AttachFile,
                             contentDescription = "有附件",
                             modifier = Modifier.size(14.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
@@ -98,10 +97,20 @@ fun BillRow(
                     }
                 }
                 val dateText = if (showDate) dateLabel(bill.dateEpochDay) else ""
+                val tagText = remember(bill.tags, bill.note) {
+                    val tagList = if (bill.tags.isNotBlank()) {
+                        bill.tags.split('\n', ',').map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+                    } else emptyList()
+                    val noteTrimmed = bill.note.trim()
+                    buildList {
+                        if (tagList.isNotEmpty()) add(tagList.joinToString(" "))
+                        if (noteTrimmed.isNotEmpty() && noteTrimmed !in tagList) add(noteTrimmed)
+                    }.joinToString(" · ")
+                }
                 val subtitle = listOfNotNull(
                     dateText.takeIf { it.isNotEmpty() },
                     account?.name?.takeIf { it.isNotEmpty() },
-                    bill.note.takeIf { it.isNotBlank() }
+                    tagText.takeIf { it.isNotBlank() }
                 ).joinToString(" · ")
                 if (subtitle.isNotEmpty()) {
                     Text(
@@ -113,6 +122,26 @@ fun BillRow(
                     )
                 }
             }
+            // 图片附件缩略图（放在金额左侧，确保右侧所有金额竖向严格对齐）
+            if (bill.attachmentMime?.startsWith("image/") == true && bill.attachmentUri != null) {
+                val context = LocalContext.current
+                val imageRequest = remember(bill.attachmentUri, context) {
+                    ImageRequest.Builder(context)
+                        .data(android.net.Uri.parse(bill.attachmentUri))
+                        .size(120)
+                        .crossfade(false)
+                        .build()
+                }
+                AsyncImage(
+                    model = imageRequest,
+                    contentDescription = "附件图片",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .padding(end = 10.dp)
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                )
+            }
             Text(
                 text = (if (bill.type == Bill.TYPE_EXPENSE) "-" else "+") + formatCents(bill.amountCents),
                 style = MaterialTheme.typography.titleMedium,
@@ -123,18 +152,6 @@ fun BillRow(
                     MaterialTheme.colorScheme.primary
                 }
             )
-            // 图片附件缩略图（一眼可见账单带图）
-            if (bill.attachmentMime?.startsWith("image/") == true && bill.attachmentUri != null) {
-                Spacer(Modifier.width(8.dp))
-                AsyncImage(
-                    model = android.net.Uri.parse(bill.attachmentUri),
-                    contentDescription = "附件图片",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                )
-            }
         }
     }
 }

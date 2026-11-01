@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -132,7 +134,7 @@ fun BillListScreen(
                 }
             }
 
-            if (state.items.isEmpty()) {
+            if (state.isLoaded && state.groups.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -146,21 +148,29 @@ fun BillListScreen(
                     )
                 }
             } else {
-                LazyColumn(Modifier.fillMaxSize()) {
-                    state.items.forEach { row ->
-                        when (row) {
-                            is BillListRow.Header -> stickyHeader(key = "header_${row.month}") {
-                                MonthHeaderRow(row)
-                            }
-                            is BillListRow.Item -> item(key = "bill_${row.bill.id}") {
-                                BillRow(
-                                    bill = row.bill,
-                                    category = row.category,
-                                    account = row.account,
-                                    showDate = false,
-                                    onClick = { onBillClick(row.bill.id) }
-                                )
-                            }
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = 88.dp)
+                ) {
+                    state.groups.forEach { group ->
+                        stickyHeader(
+                            key = "header_${group.header.month}",
+                            contentType = "header"
+                        ) {
+                            MonthHeaderRow(group.header)
+                        }
+                        items(
+                            items = group.items,
+                            key = { "bill_${it.bill.id}" },
+                            contentType = { "bill" }
+                        ) { row ->
+                            BillRow(
+                                bill = row.bill,
+                                category = row.category,
+                                account = row.account,
+                                showDate = true,
+                                onClick = { onBillClick(row.bill.id) }
+                            )
                         }
                     }
                 }

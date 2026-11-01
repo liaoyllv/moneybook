@@ -23,7 +23,7 @@ import com.andersonlin.moneybook.data.model.RecurringBill
         Bill::class, Category::class, Account::class, Budget::class,
         RecurringBill::class, Ledger::class, Goal::class, CategoryBudget::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -49,10 +49,17 @@ abstract class AppDatabase : RoomDatabase() {
                     "moneybook.db"
                 )
                     .addCallback(seedCallback)
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .build()
                     .also { instance = it }
             }
+
+        internal val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE accounts ADD COLUMN note TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE bills ADD COLUMN tags TEXT NOT NULL DEFAULT ''")
+            }
+        }
 
         /** 首次创建数据库时写入内置默认分类、默认账户与默认账本 */
         private val seedCallback = object : Callback() {

@@ -99,7 +99,7 @@ interface BillDao {
         SELECT b.* FROM bills b LEFT JOIN categories c ON b.categoryId = c.id
         WHERE b.ledgerId = :ledgerId
           AND (:typeFilter = -1 OR b.type = :typeFilter)
-          AND (b.note LIKE '%' || :keyword || '%' OR c.name LIKE '%' || :keyword || '%')
+          AND (:keyword = '' OR b.note LIKE '%' || :keyword || '%' OR b.tags LIKE '%' || :keyword || '%' OR c.name LIKE '%' || :keyword || '%')
           AND (:minCents IS NULL OR b.amountCents >= :minCents)
           AND (:maxCents IS NULL OR b.amountCents <= :maxCents)
         ORDER BY b.dateEpochDay DESC, b.id DESC
@@ -115,6 +115,19 @@ interface BillDao {
 
     @Query("SELECT COUNT(*) FROM bills WHERE categoryId = :categoryId")
     suspend fun countByCategory(categoryId: Long): Int
+
+    data class CategoryCount(val categoryId: Long, val count: Int)
+
+    @Query("SELECT categoryId, COUNT(*) AS count FROM bills WHERE ledgerId = :ledgerId GROUP BY categoryId")
+    fun getCategoryCounts(ledgerId: Long): Flow<List<CategoryCount>>
+
+    data class BillTagNote(val categoryId: Long, val tags: String, val note: String)
+
+    @Query("SELECT categoryId, tags, note FROM bills WHERE ledgerId = :ledgerId AND (tags != '' OR note != '')")
+    fun getTagNotes(ledgerId: Long): Flow<List<BillTagNote>>
+
+    @Query("SELECT categoryId, tags, note FROM bills WHERE ledgerId = :ledgerId AND (tags != '' OR note != '')")
+    suspend fun getTagNotesSnapshot(ledgerId: Long): List<BillTagNote>
 
     /** 恢复备份时更新附件地址（指向应用私有目录） */
     @Query("UPDATE bills SET attachmentUri = :uri, attachmentMime = :mime WHERE id = :id")
@@ -132,6 +145,9 @@ interface BillDao {
 
     @Query("DELETE FROM bills WHERE ledgerId = :ledgerId")
     suspend fun deleteByLedger(ledgerId: Long)
+
+    @Query("UPDATE bills SET categoryId = :target WHERE categoryId = :source")
+    suspend fun reassignCategory(source: Long, target: Long)
 
     // ---- 备份 / 恢复 ----
 

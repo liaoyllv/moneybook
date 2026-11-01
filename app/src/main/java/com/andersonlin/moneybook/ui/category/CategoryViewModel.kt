@@ -87,6 +87,12 @@ class CategoryViewModel(
         }
     }
 
+    fun merge(source: Category, target: Category) { viewModelScope.launch {
+        runCatching { categoryRepository.merge(source.id,target.id) }
+            .onSuccess { _events.emit(CategoryEvent.ShowMessage("已合并至「${target.name}」，同月预算已相加")) }
+            .onFailure { _events.emit(CategoryEvent.ShowMessage(it.message ?: "合并失败")) }
+    } }
+
     private fun emit(event: CategoryEvent) {
         viewModelScope.launch { _events.emit(event) }
     }

@@ -357,7 +357,7 @@ fun SettingsScreen(
         AlertDialog(
             onDismissRequest = { showImportConfirm = false },
             title = { Text("导入备份") },
-            text = { Text("导入备份将覆盖当前所有账单和分类数据，且无法撤销。确定继续吗？") },
+            text = { Text("导入后将整体替换账本、账单、分类、账户、预算、周期账单和存钱目标。请先备份现有数据，确定继续吗？") },
             confirmButton = {
                 TextButton(onClick = {
                     showImportConfirm = false

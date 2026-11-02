@@ -1,5 +1,6 @@
 package com.andersonlin.moneybook.ui.home
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -23,16 +24,23 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -47,27 +55,38 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.andersonlin.moneybook.data.model.Bill
 import com.andersonlin.moneybook.ui.AppViewModelProvider
+import com.andersonlin.moneybook.ui.bill.AmountFilterDialog
+import com.andersonlin.moneybook.ui.bill.BillFilter
+import com.andersonlin.moneybook.ui.bill.BillListViewModel
+import com.andersonlin.moneybook.ui.bill.MonthHeaderRow
+import com.andersonlin.moneybook.ui.bill.amountLabel
 import com.andersonlin.moneybook.ui.components.BillRow
+import com.andersonlin.moneybook.ui.components.TopSnackbarHost
 import com.andersonlin.moneybook.ui.components.EmptyState
 import com.andersonlin.moneybook.ui.goal.toProgress
 import com.andersonlin.moneybook.util.formatCents
 import java.time.YearMonth
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
     onAddBill: () -> Unit,
-    onViewAll: () -> Unit,
     onBillClick: (Long) -> Unit,
     onSetBudget: () -> Unit,
     onManageLedgers: () -> Unit,
     onOpenGoals: () -> Unit,
-    viewModel: HomeViewModel = viewModel(factory = AppViewModelProvider.Factory)
+    homeViewModel: HomeViewModel = viewModel(factory = AppViewModelProvider.Factory),
+    billListViewModel: BillListViewModel = viewModel(factory = AppViewModelProvider.Factory)
 ) {
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val homeState by homeViewModel.uiState.collectAsStateWithLifecycle()
+    val billState by billListViewModel.uiState.collectAsStateWithLifecycle()
     var showLedgerDialog by remember { mutableStateOf(false) }
+    var showAmountDialog by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
 
+    Box(Modifier.fillMaxSize()) {
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -76,55 +95,120 @@ fun HomeScreen(
     ) {
         item(key = "summary", contentType = "summary") {
             MonthSummaryCard(
-                month = state.month,
-                income = state.income,
-                expense = state.expense,
-                todayExpense = state.todayExpense,
-                ledgerName = state.ledgerName,
+                month = homeState.month,
                 onSwitchLedger = { showLedgerDialog = true },
-                budgetCents = state.budgetCents,
-                categoryAlerts = state.categoryAlerts,
+                income = homeState.income,
+                expense = homeState.expense,
+                todayExpense = homeState.todayExpense,
+                ledgerName = homeState.ledgerName,
+                budgetCents = homeState.budgetCents,
+                categoryAlerts = homeState.categoryAlerts,
                 onSetBudget = onSetBudget
             )
         }
 
-        if (state.isLoaded && state.recentBills.isEmpty()) {
-            item(key = "empty", contentType = "empty") {
-                EmptyState(
-                    icon = Icons.Filled.AccountBalanceWallet,
-                    title = "还没有账单",
-                    subtitle = "点击右下角 + 记一笔吧"
+        item(key = "search_box") {
+            OutlinedTextField(
+                value = billState.keyword,
+                onValueChange = billListViewModel::setKeyword,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                placeholder = { Text("搜索备注或分类") },
+                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (billState.keyword.isNotEmpty()) {
+                        IconButton(onClick = { billListViewModel.setKeyword("") }) {
+                            Icon(Icons.Filled.Close, contentDescription = "清除")
+                        }
+                    }
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(28.dp)
+            )
+        }
+
+        item(key = "filters_row") {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                FilterChip(
+                    selected = billState.typeFilter == BillFilter.TYPE_ALL,
+                    onClick = { billListViewModel.setTypeFilter(BillFilter.TYPE_ALL) },
+                    label = { Text("全部") }
                 )
-            }
-        } else if (state.recentBills.isNotEmpty()) {
-            item(key = "recent_header", contentType = "header") {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 16.dp, end = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "最近账单",
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.weight(1f)
-                    )
-                    TextButton(onClick = onViewAll) { Text("全部") }
+                FilterChip(
+                    selected = billState.typeFilter == Bill.TYPE_EXPENSE,
+                    onClick = { billListViewModel.setTypeFilter(Bill.TYPE_EXPENSE) },
+                    label = { Text("支出") }
+                )
+                FilterChip(
+                    selected = billState.typeFilter == Bill.TYPE_INCOME,
+                    onClick = { billListViewModel.setTypeFilter(Bill.TYPE_INCOME) },
+                    label = { Text("收入") }
+                )
+                FilterChip(
+                    selected = billState.minCents != null || billState.maxCents != null,
+                    onClick = { showAmountDialog = true },
+                    label = { Text(amountLabel(billState.minCents, billState.maxCents)) }
+                )
+                if (billState.hasAnyFilter) {
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = billListViewModel::clearAllFilters) {
+                        Text("重置", style = MaterialTheme.typography.bodySmall)
+                    }
                 }
             }
-            items(
-                items = state.recentBills,
-                key = { it.id },
-                contentType = { "bill" }
-            ) { bill ->
-                BillRow(
-                    bill = bill,
-                    category = state.categories[bill.categoryId],
-                    account = state.accounts[bill.accountId],
-                    onClick = { onBillClick(bill.id) }
-                )
+        }
+
+        if (billState.isLoaded && billState.groups.isEmpty()) {
+            item(key = "empty_bills", contentType = "empty") {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 40.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    EmptyState(
+                        icon = Icons.AutoMirrored.Filled.List,
+                        title = if (billState.keyword.isNotBlank()) "没有找到相关账单" else "暂无账单",
+                        subtitle = if (billState.keyword.isBlank()) "点击右下角 + 记一笔吧" else null
+                    )
+                }
+            }
+        } else {
+            billState.groups.forEach { group ->
+                stickyHeader(
+                    key = "header_${group.header.month}",
+                    contentType = "header"
+                ) {
+                    MonthHeaderRow(group.header)
+                }
+                items(
+                    items = group.items,
+                    key = { "bill_${it.bill.id}" },
+                    contentType = { "bill" }
+                ) { row ->
+                    BillRow(
+                        bill = row.bill,
+                        category = row.category,
+                        account = row.account,
+                        showDate = true,
+                        onClick = { onBillClick(row.bill.id) }
+                    )
+                }
             }
         }
+    }
+
+    TopSnackbarHost(
+        hostState = snackbarHostState,
+        modifier = Modifier.align(Alignment.TopCenter)
+    )
     }
 
     // 账本切换
@@ -134,12 +218,12 @@ fun HomeScreen(
             title = { Text("切换账本") },
             text = {
                 Column {
-                    state.ledgers.forEach { ledger ->
+                    homeState.ledgers.forEach { ledger ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
-                                    viewModel.setActiveLedger(ledger.id)
+                                    homeViewModel.setActiveLedger(ledger.id)
                                     showLedgerDialog = false
                                 }
                                 .padding(vertical = 12.dp),
@@ -150,7 +234,7 @@ fun HomeScreen(
                                 style = MaterialTheme.typography.bodyLarge,
                                 modifier = Modifier.weight(1f)
                             )
-                            if (ledger.id == state.ledgerId) {
+                            if (ledger.id == homeState.ledgerId) {
                                 Text(
                                     text = "使用中",
                                     style = MaterialTheme.typography.labelSmall,
@@ -166,6 +250,16 @@ fun HomeScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showLedgerDialog = false }) { Text("关闭") }
+            }
+        )
+    }
+
+    if (showAmountDialog) {
+        AmountFilterDialog(
+            onDismiss = { showAmountDialog = false },
+            onApply = { min, max ->
+                billListViewModel.setAmountRange(min, max)
+                showAmountDialog = false
             }
         )
     }

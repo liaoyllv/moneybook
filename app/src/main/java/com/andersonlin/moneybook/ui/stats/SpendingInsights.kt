@@ -85,6 +85,144 @@ fun expenseAnomalies(current: List<InsightRecord>, history: List<InsightRecord>)
 
 data class DayComparison(val day: Int, val current: Long?, val previous: Long?, val currentCount: Int, val previousCount: Int)
 
+data class ComparisonItem(
+    val label: String,
+    val subLabel: String,
+    val prevSubLabel: String,
+    val index: Int,
+    val current: Long?,
+    val previous: Long?,
+    val currentCount: Int,
+    val previousCount: Int
+)
+
+data class PeriodComparison(
+    val currentTitle: String,
+    val previousTitle: String,
+    val items: List<ComparisonItem>
+)
+
+fun compareExpensePeriod(
+    records: List<InsightRecord>,
+    scale: Int,
+    anchor: LocalDate,
+    today: LocalDate = LocalDate.now()
+): PeriodComparison {
+    val expense = records.asSequence().filter { it.type == 0 }.groupBy { it.day }
+
+    return when (scale) {
+        0 -> { // 按日：当天 vs 前一天
+            val prevDay = anchor.minusDays(1)
+            val cRows = expense[anchor.toEpochDay()] ?: emptyList()
+            val pRows = expense[prevDay.toEpochDay()] ?: emptyList()
+            val cTotal = if (anchor > today) null else cRows.sumOf { it.amount }
+            val pTotal = if (prevDay > today) null else pRows.sumOf { it.amount }
+            PeriodComparison(
+                currentTitle = "↑ 所选日（${anchor.monthValue}月${anchor.dayOfMonth}日）",
+                previousTitle = "↓ 前一日（${prevDay.monthValue}月${prevDay.dayOfMonth}日）",
+                items = listOf(
+                    ComparisonItem(
+                        label = "当天",
+                        subLabel = "${anchor.monthValue}月${anchor.dayOfMonth}日",
+                        prevSubLabel = "${prevDay.monthValue}月${prevDay.dayOfMonth}日",
+                        index = 1,
+                        current = cTotal,
+                        previous = pTotal,
+                        currentCount = cRows.size,
+                        previousCount = pRows.size
+                    )
+                )
+            )
+        }
+        1 -> { // 按周：本周 vs 上周 (周一至周日 7 天)
+            val monday = anchor.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+            val prevMonday = monday.minusWeeks(1)
+            val weekDays = listOf("一", "二", "三", "四", "五", "六", "日")
+            val weekFull = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+            val items = (0..6).map { i ->
+                val cDate = monday.plusDays(i.toLong())
+                val pDate = prevMonday.plusDays(i.toLong())
+                val cRows = expense[cDate.toEpochDay()] ?: emptyList()
+                val pRows = expense[pDate.toEpochDay()] ?: emptyList()
+                val cTotal = if (cDate > today) null else cRows.sumOf { it.amount }
+                val pTotal = if (pDate > today) null else pRows.sumOf { it.amount }
+                ComparisonItem(
+                    label = weekDays[i],
+                    subLabel = "${cDate.monthValue}.${cDate.dayOfMonth} ${weekFull[i]}",
+                    prevSubLabel = "${pDate.monthValue}.${pDate.dayOfMonth} ${weekFull[i]}",
+                    index = i + 1,
+                    current = cTotal,
+                    previous = pTotal,
+                    currentCount = cRows.size,
+                    previousCount = pRows.size
+                )
+            }
+            PeriodComparison(
+                currentTitle = "↑ 本周（${monday.monthValue}.${monday.dayOfMonth}~${monday.plusDays(6).monthValue}.${monday.plusDays(6).dayOfMonth}）",
+                previousTitle = "↓ 上周（${prevMonday.monthValue}.${prevMonday.dayOfMonth}~${prevMonday.plusDays(6).monthValue}.${prevMonday.plusDays(6).dayOfMonth}）",
+                items = items
+            )
+        }
+        3 -> { // 按年：本年 vs 上年 (12 个月)
+            val year = anchor.year
+            val prevYear = year - 1
+            val items = (1..12).map { m ->
+                val ymC = YearMonth.of(year, m)
+                val ymP = YearMonth.of(prevYear, m)
+                val cRange = ymC.atDay(1).toEpochDay()..ymC.atEndOfMonth().toEpochDay()
+                val pRange = ymP.atDay(1).toEpochDay()..ymP.atEndOfMonth().toEpochDay()
+                val cRows = records.filter { it.type == 0 && it.day in cRange }
+                val pRows = records.filter { it.type == 0 && it.day in pRange }
+                val cTotal = if (ymC.atDay(1) > today) null else cRows.sumOf { it.amount }
+                val pTotal = if (ymP.atDay(1) > today) null else pRows.sumOf { it.amount }
+                ComparisonItem(
+                    label = "${m}月",
+                    subLabel = "${year}年${m}月",
+                    prevSubLabel = "${prevYear}年${m}月",
+                    index = m,
+                    current = cTotal,
+                    previous = pTotal,
+                    currentCount = cRows.size,
+                    previousCount = pRows.size
+                )
+            }
+            PeriodComparison(
+                currentTitle = "↑ 本年（${year}年）",
+                previousTitle = "↓ 上年（${prevYear}年）",
+                items = items
+            )
+        }
+        else -> { // 按月：所选月 vs 上个月 (1..31 天)
+            val month = YearMonth.from(anchor)
+            val previous = month.minusMonths(1)
+            val daysCount = maxOf(month.lengthOfMonth(), previous.lengthOfMonth())
+            val items = (1..daysCount).map { day ->
+                val cDate = if (day <= month.lengthOfMonth()) month.atDay(day) else null
+                val pDate = if (day <= previous.lengthOfMonth()) previous.atDay(day) else null
+                val cRows = cDate?.let { expense[it.toEpochDay()] } ?: emptyList()
+                val pRows = pDate?.let { expense[it.toEpochDay()] } ?: emptyList()
+                val cTotal = if (cDate == null || cDate > today) null else cRows.sumOf { it.amount }
+                val pTotal = if (pDate == null || pDate > today) null else pRows.sumOf { it.amount }
+                ComparisonItem(
+                    label = day.toString(),
+                    subLabel = "${month.monthValue}月${day}日",
+                    prevSubLabel = "${previous.monthValue}月${day}日",
+                    index = day,
+                    current = cTotal,
+                    previous = pTotal,
+                    currentCount = cRows.size,
+                    previousCount = pRows.size
+                )
+            }
+            PeriodComparison(
+                currentTitle = "↑ 所选月（${month.monthValue}月）",
+                previousTitle = "↓ 上个月（${previous.monthValue}月）",
+                items = items
+            )
+        }
+    }
+}
+
 /** 同日支出对比：无该日期/尚未到来为null；存在该日但未记录为0。 */
 fun compareExpenseMonths(records: List<InsightRecord>, month: YearMonth, today: LocalDate=LocalDate.now()): List<DayComparison> {
     val previous=month.minusMonths(1)

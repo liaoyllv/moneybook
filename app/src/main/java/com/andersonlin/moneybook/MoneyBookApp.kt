@@ -18,6 +18,7 @@ import com.andersonlin.moneybook.data.repository.RecurringRepository
 import com.andersonlin.moneybook.data.saving.SavingDepositService
 import com.andersonlin.moneybook.data.settings.LockSettingsRepository
 import com.andersonlin.moneybook.data.settings.SettingsRepository
+import com.andersonlin.moneybook.util.SoundFeedback
 import com.andersonlin.moneybook.widget.MoneyBookWidget
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -55,6 +56,18 @@ class MoneyBookApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // 初始化低延迟按键音效与触感
+        SoundFeedback.init(this)
+        applicationScope.launch {
+            settingsRepository.soundEffectsEnabled.collect {
+                SoundFeedback.soundEnabled = it
+            }
+        }
+        applicationScope.launch {
+            settingsRepository.hapticsEnabled.collect {
+                SoundFeedback.hapticsEnabled = it
+            }
+        }
         // 启动时补记到期的周期账单（失败不影响使用）
         applicationScope.launch {
             runCatching {

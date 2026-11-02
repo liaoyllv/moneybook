@@ -1,21 +1,32 @@
 package com.andersonlin.moneybook.ui.navigation
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.background
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ReceiptLong
@@ -48,6 +59,10 @@ import androidx.navigation.navArgument
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import com.andersonlin.moneybook.data.model.Bill
+import com.andersonlin.moneybook.util.SoundFeedback
+import com.andersonlin.moneybook.util.SoundType
+import com.andersonlin.moneybook.util.tactileClick
+import com.andersonlin.moneybook.util.tactileScale
 import com.andersonlin.moneybook.ui.account.AccountScreen
 import com.andersonlin.moneybook.ui.bill.AddEditBillScreen
 import com.andersonlin.moneybook.ui.bill.BillListScreen
@@ -103,7 +118,6 @@ private data class TopDestination(
 
 private val topDestinations = listOf(
     TopDestination(Routes.HOME, "首页", Icons.Filled.Home),
-    TopDestination(Routes.BILLS, "账单", Icons.AutoMirrored.Filled.ReceiptLong),
     TopDestination(Routes.STATS, "统计", Icons.Filled.PieChart),
     TopDestination(Routes.SETTINGS, "设置", Icons.Filled.Settings)
 )
@@ -131,6 +145,8 @@ fun MainScreen(
     val billListViewModel: BillListViewModel = viewModel(factory = AppViewModelProvider.Factory)
     val statsViewModel: StatsViewModel = viewModel(factory = AppViewModelProvider.Factory)
     val settingsViewModel: SettingsViewModel = viewModel(factory = AppViewModelProvider.Factory)
+    val view = LocalView.current
+    val fabInteraction = remember { MutableInteractionSource() }
 
     BackHandler(enabled = selectedTab != 0) {
         selectedTab = 0
@@ -149,15 +165,18 @@ fun MainScreen(
                 ) {
                     topDestinations.forEachIndexed { index, dest ->
                         val selected = selectedTab == index
+                        val pillScale by animateFloatAsState(
+                            targetValue = if (selected) 1f else 0.82f,
+                            animationSpec = spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessHigh),
+                            label = "tabPillScale"
+                        )
                         Box(
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxHeight()
-                                .selectable(
-                                    selected = selected,
-                                    role = Role.Tab,
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null,
+                                .tactileClick(
+                                    soundType = SoundType.LIGHT,
+                                    scaleDown = 0.88f,
                                     onClick = { selectedTab = index }
                                 ),
                             contentAlignment = Alignment.Center
@@ -165,6 +184,10 @@ fun MainScreen(
                             Box(
                                 Modifier
                                     .size(width = 44.dp, height = 36.dp)
+                                    .graphicsLayer {
+                                        scaleX = pillScale
+                                        scaleY = pillScale
+                                    }
                                     .background(
                                         if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
                                         RoundedCornerShape(18.dp)
@@ -179,9 +202,14 @@ fun MainScreen(
             }
         },
         floatingActionButton = {
-            if (selectedTab == 0 || selectedTab == 1) {
+            if (selectedTab == 0) {
                 FloatingActionButton(
-                    onClick = { onNavigateToAddEdit(null, Bill.TYPE_EXPENSE, 0L) },
+                    onClick = {
+                        SoundFeedback.play(view, SoundType.CRISP)
+                        onNavigateToAddEdit(null, Bill.TYPE_EXPENSE, 0L)
+                    },
+                    modifier = Modifier.tactileScale(fabInteraction, scaleDown = 0.90f),
+                    interactionSource = fabInteraction,
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary
                 ) {
@@ -190,31 +218,32 @@ fun MainScreen(
             }
         }
     ) { padding ->
-        Box(
+        AnimatedContent(
+            targetState = selectedTab,
+            transitionSpec = {
+                fadeIn(animationSpec = tween(110, easing = LinearOutSlowInEasing)) togetherWith
+                    fadeOut(animationSpec = tween(80, easing = FastOutLinearInEasing))
+            },
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
-        ) {
-            when (selectedTab) {
+                .padding(padding),
+            label = "mainTabContent"
+        ) { tab ->
+            when (tab) {
                 0 -> HomeScreen(
                     onAddBill = { onNavigateToAddEdit(null, Bill.TYPE_EXPENSE, 0L) },
-                    onViewAll = { selectedTab = 1 },
                     onBillClick = { id -> onNavigateToAddEdit(id, Bill.TYPE_EXPENSE, 0L) },
                     onSetBudget = onNavigateToBudget,
                     onManageLedgers = onNavigateToLedgers,
                     onOpenGoals = onNavigateToGoals,
-                    viewModel = homeViewModel
+                    homeViewModel = homeViewModel,
+                    billListViewModel = billListViewModel
                 )
-                1 -> BillListScreen(
-                    onAddBill = { onNavigateToAddEdit(null, Bill.TYPE_EXPENSE, 0L) },
-                    onBillClick = { id -> onNavigateToAddEdit(id, Bill.TYPE_EXPENSE, 0L) },
-                    viewModel = billListViewModel
-                )
-                2 -> StatsScreen(
+                1 -> StatsScreen(
                     onAddBillForDate = { date -> onNavigateToAddEdit(null, Bill.TYPE_EXPENSE, date) },
                     viewModel = statsViewModel
                 )
-                3 -> SettingsScreen(
+                2 -> SettingsScreen(
                     onManageCategories = onNavigateToCategories,
                     onManageAccounts = onNavigateToAccounts,
                     onManageBudget = onNavigateToBudget,
@@ -260,7 +289,23 @@ fun AppRoot(addEvents: Flow<Unit> = emptyFlow()) {
             modifier = Modifier
                 .fillMaxSize()
         ) {
-        composable(Routes.MAIN) {
+        composable(
+            Routes.MAIN,
+            exitTransition = {
+                if (targetState.destination.route?.startsWith("add_edit") == true) {
+                    ExitTransition.None
+                } else {
+                    fadeOut(animationSpec = tween(90))
+                }
+            },
+            popEnterTransition = {
+                if (initialState.destination.route?.startsWith("add_edit") == true) {
+                    EnterTransition.None
+                } else {
+                    fadeIn(animationSpec = tween(100))
+                }
+            }
+        ) {
             MainScreen(
                 onNavigateToAddEdit = { billId, type, date -> safeNavigateToAddEdit(billId, type, date) },
                 onNavigateToCategories = { navController.navigate(Routes.CATEGORIES) { launchSingleTop = true } },
@@ -294,21 +339,21 @@ fun AppRoot(addEvents: Flow<Unit> = emptyFlow()) {
             ),
             enterTransition = {
                 slideInVertically(
-                    initialOffsetY = { it },
-                    animationSpec = tween(240, easing = FastOutSlowInEasing)
-                ) + fadeIn(animationSpec = tween(160))
+                    initialOffsetY = { (it * 0.18f).toInt() },
+                    animationSpec = tween(160, easing = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1.0f))
+                ) + fadeIn(animationSpec = tween(130))
             },
             exitTransition = {
-                fadeOut(animationSpec = tween(160))
+                fadeOut(animationSpec = tween(100))
             },
             popEnterTransition = {
-                fadeIn(animationSpec = tween(160))
+                fadeIn(animationSpec = tween(100))
             },
             popExitTransition = {
                 slideOutVertically(
                     targetOffsetY = { it },
-                    animationSpec = tween(240, easing = FastOutSlowInEasing)
-                ) + fadeOut(animationSpec = tween(160))
+                    animationSpec = tween(150, easing = FastOutLinearInEasing)
+                ) + fadeOut(animationSpec = tween(110))
             }
             ) { entry ->
                 val billId = entry.arguments?.getLong("billId") ?: -1L
@@ -328,37 +373,48 @@ fun AppRoot(addEvents: Flow<Unit> = emptyFlow()) {
                     )
                 }
             }
-            composable(Routes.CATEGORIES) {
+            val subpageEnter = slideInHorizontally(
+                initialOffsetX = { (it * 0.22f).toInt() },
+                animationSpec = tween(160, easing = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1.0f))
+            ) + fadeIn(tween(130))
+            val subpageExit = fadeOut(tween(90))
+            val subpagePopEnter = fadeIn(tween(100))
+            val subpagePopExit = slideOutHorizontally(
+                targetOffsetX = { (it * 0.22f).toInt() },
+                animationSpec = tween(130, easing = FastOutLinearInEasing)
+            ) + fadeOut(tween(90))
+
+            composable(Routes.CATEGORIES, enterTransition = { subpageEnter }, exitTransition = { subpageExit }, popEnterTransition = { subpagePopEnter }, popExitTransition = { subpagePopExit }) {
                 CategoryScreen(onBack = { navController.popBackStack() })
             }
-            composable(Routes.ACCOUNTS) {
+            composable(Routes.ACCOUNTS, enterTransition = { subpageEnter }, exitTransition = { subpageExit }, popEnterTransition = { subpagePopEnter }, popExitTransition = { subpagePopExit }) {
                 AccountScreen(onBack = { navController.popBackStack() })
             }
-            composable(Routes.BUDGET) {
+            composable(Routes.BUDGET, enterTransition = { subpageEnter }, exitTransition = { subpageExit }, popEnterTransition = { subpagePopEnter }, popExitTransition = { subpagePopExit }) {
                 BudgetScreen(onBack = { navController.popBackStack() })
             }
-            composable(Routes.CATEGORY_BUDGET) {
+            composable(Routes.CATEGORY_BUDGET, enterTransition = { subpageEnter }, exitTransition = { subpageExit }, popEnterTransition = { subpagePopEnter }, popExitTransition = { subpagePopExit }) {
                 CategoryBudgetScreen(onBack = { navController.popBackStack() })
             }
-            composable(Routes.RECURRING) {
+            composable(Routes.RECURRING, enterTransition = { subpageEnter }, exitTransition = { subpageExit }, popEnterTransition = { subpagePopEnter }, popExitTransition = { subpagePopExit }) {
                 RecurringScreen(onBack = { navController.popBackStack() })
             }
-            composable(Routes.LOCK) {
+            composable(Routes.LOCK, enterTransition = { subpageEnter }, exitTransition = { subpageExit }, popEnterTransition = { subpagePopEnter }, popExitTransition = { subpagePopExit }) {
                 LockSettingsScreen(onBack = { navController.popBackStack() })
             }
-            composable(Routes.LEDGERS) {
+            composable(Routes.LEDGERS, enterTransition = { subpageEnter }, exitTransition = { subpageExit }, popEnterTransition = { subpagePopEnter }, popExitTransition = { subpagePopExit }) {
                 LedgerScreen(onBack = { navController.popBackStack() })
             }
-            composable(Routes.GOALS) {
+            composable(Routes.GOALS, enterTransition = { subpageEnter }, exitTransition = { subpageExit }, popEnterTransition = { subpagePopEnter }, popExitTransition = { subpagePopExit }) {
                 GoalScreen(onBack = { navController.popBackStack() })
             }
-            composable(Routes.REMINDER) {
+            composable(Routes.REMINDER, enterTransition = { subpageEnter }, exitTransition = { subpageExit }, popEnterTransition = { subpagePopEnter }, popExitTransition = { subpagePopExit }) {
                 ReminderScreen(onBack = { navController.popBackStack() })
             }
-            composable(Routes.ONBOARDING) {
+            composable(Routes.ONBOARDING, enterTransition = { subpageEnter }, exitTransition = { subpageExit }, popEnterTransition = { subpagePopEnter }, popExitTransition = { subpagePopExit }) {
                 OnboardingScreen(onFinished = { navController.popBackStack() })
             }
-            composable(Routes.ABOUT) {
+            composable(Routes.ABOUT, enterTransition = { subpageEnter }, exitTransition = { subpageExit }, popEnterTransition = { subpagePopEnter }, popExitTransition = { subpagePopExit }) {
                 AboutScreen(onBack = { navController.popBackStack() })
             }
     }

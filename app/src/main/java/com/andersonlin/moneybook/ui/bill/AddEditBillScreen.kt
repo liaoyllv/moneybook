@@ -94,7 +94,13 @@ import com.andersonlin.moneybook.MainActivity
 import com.andersonlin.moneybook.MoneyBookApp
 import com.andersonlin.moneybook.data.model.Bill
 import com.andersonlin.moneybook.ui.AppViewModelProvider
+import com.andersonlin.moneybook.ui.components.CompactTopBar
+import com.andersonlin.moneybook.ui.components.TopSnackbarHost
 import com.andersonlin.moneybook.util.fullDateLabel
+import com.andersonlin.moneybook.util.SoundFeedback
+import com.andersonlin.moneybook.util.SoundType
+import com.andersonlin.moneybook.util.tactileScale
+import androidx.compose.ui.platform.LocalView
 
 /** 从任意 Context 向上找 Activity */
 private tailrec fun Context.findActivity(): Activity? = when (this) {
@@ -121,6 +127,7 @@ fun AddEditBillScreen(
     var showDatePicker by remember { mutableStateOf(false) }
     var showImageViewer by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    val view = LocalView.current
     val appContext = context.applicationContext
     val activity = remember(context) { context.findActivity() as? MainActivity }
 
@@ -151,9 +158,9 @@ fun AddEditBillScreen(
         }
     }
 
+    Box(Modifier.fillMaxSize()) {
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             Surface(tonalElevation = 3.dp) {
                 Column(
@@ -243,7 +250,10 @@ fun AddEditBillScreen(
                             // 支付账户下拉
                             Box {
                                 Surface(
-                                    onClick = { accountMenuExpanded = true },
+                                    onClick = {
+                                        SoundFeedback.play(view, SoundType.LIGHT)
+                                        accountMenuExpanded = true
+                                    },
                                     shape = RoundedCornerShape(8.dp),
                                     color = Color.Transparent
                                 ) {
@@ -279,6 +289,7 @@ fun AddEditBillScreen(
                                                 }
                                             },
                                             onClick = {
+                                                SoundFeedback.play(view, SoundType.LIGHT)
                                                 viewModel.setAccount(account.id)
                                                 accountMenuExpanded = false
                                             }
@@ -290,34 +301,52 @@ fun AddEditBillScreen(
                     }
 
                     if (state.isEdit) {
+                        val saveInteraction = remember { MutableInteractionSource() }
                         Button(
-                            onClick = { viewModel.save(andContinue = false) },
+                            onClick = {
+                                SoundFeedback.play(view, SoundType.CRISP)
+                                viewModel.save(andContinue = false)
+                            },
+                            interactionSource = saveInteraction,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(50.dp),
+                                .height(50.dp)
+                                .tactileScale(saveInteraction, scaleDown = 0.94f),
                             shape = RoundedCornerShape(25.dp)
                         ) {
                             Text("保存", style = MaterialTheme.typography.titleMedium)
                         }
                     } else {
+                        val contInteraction = remember { MutableInteractionSource() }
+                        val doneInteraction = remember { MutableInteractionSource() }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             OutlinedButton(
-                                onClick = { viewModel.save(andContinue = true) },
+                                onClick = {
+                                    SoundFeedback.play(view, SoundType.CRISP)
+                                    viewModel.save(andContinue = true)
+                                },
+                                interactionSource = contInteraction,
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(50.dp),
+                                    .height(50.dp)
+                                    .tactileScale(contInteraction, scaleDown = 0.94f),
                                 shape = RoundedCornerShape(25.dp)
                             ) {
                                 Text("继续记", style = MaterialTheme.typography.titleMedium)
                             }
                             Button(
-                                onClick = { viewModel.save(andContinue = false) },
+                                onClick = {
+                                    SoundFeedback.play(view, SoundType.CRISP)
+                                    viewModel.save(andContinue = false)
+                                },
+                                interactionSource = doneInteraction,
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(50.dp),
+                                    .height(50.dp)
+                                    .tactileScale(doneInteraction, scaleDown = 0.94f),
                                 shape = RoundedCornerShape(25.dp)
                             ) {
                                 Text("记完了", style = MaterialTheme.typography.titleMedium)
@@ -328,7 +357,7 @@ fun AddEditBillScreen(
             }
         },
         topBar = {
-            TopAppBar(
+            CompactTopBar(
                 title = {
                     Text(
                         text = if (state.isEdit) "编辑账单" else "记一笔",
@@ -338,15 +367,14 @@ fun AddEditBillScreen(
                         softWrap = false
                     )
                 },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                },
+                onBack = onBack,
                 actions = {
                     TextButton(
-                        onClick = { viewModel.setType(Bill.TYPE_EXPENSE) },
-                        contentPadding = PaddingValues(horizontal = 6.dp)
+                        onClick = {
+                            SoundFeedback.play(view, SoundType.LIGHT)
+                            viewModel.setType(Bill.TYPE_EXPENSE)
+                        },
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
                     ) {
                         Text(
                             text = if (state.type == Bill.TYPE_EXPENSE) "✓ 支出" else "支出",
@@ -354,8 +382,11 @@ fun AddEditBillScreen(
                         )
                     }
                     TextButton(
-                        onClick = { viewModel.setType(Bill.TYPE_INCOME) },
-                        contentPadding = PaddingValues(horizontal = 6.dp)
+                        onClick = {
+                            SoundFeedback.play(view, SoundType.LIGHT)
+                            viewModel.setType(Bill.TYPE_INCOME)
+                        },
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
                     ) {
                         Text(
                             text = if (state.type == Bill.TYPE_INCOME) "✓ 收入" else "收入",
@@ -363,11 +394,18 @@ fun AddEditBillScreen(
                         )
                     }
                     if (state.isEdit) {
-                        IconButton(onClick = { showDeleteDialog = true }) {
-                            Icon(Icons.Filled.Delete, contentDescription = "删除")
+                        IconButton(
+                            onClick = {
+                                SoundFeedback.play(view, SoundType.LIGHT)
+                                showDeleteDialog = true
+                            },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(Icons.Filled.Delete, contentDescription = "删除", modifier = Modifier.size(20.dp))
                         }
                     }
-                }
+                },
+                height = 40.dp
             )
         }
     ) { padding ->
@@ -411,7 +449,10 @@ fun AddEditBillScreen(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Surface(
-                    onClick = { showDatePicker = true },
+                    onClick = {
+                        SoundFeedback.play(view, SoundType.LIGHT)
+                        showDatePicker = true
+                    },
                     shape = RoundedCornerShape(8.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
                 ) {
@@ -500,7 +541,10 @@ fun AddEditBillScreen(
 
                     Box {
                         Surface(
-                            onClick = { attachmentMenuExpanded = true },
+                            onClick = {
+                                SoundFeedback.play(view, SoundType.LIGHT)
+                                attachmentMenuExpanded = true
+                            },
                             shape = RoundedCornerShape(8.dp),
                             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
                         ) {
@@ -696,5 +740,10 @@ fun AddEditBillScreen(
                 }
             }
         }
+    }
+    TopSnackbarHost(
+        hostState = snackbarHostState,
+        modifier = Modifier.align(Alignment.TopCenter)
+    )
     }
 }

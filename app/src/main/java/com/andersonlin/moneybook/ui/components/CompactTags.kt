@@ -13,21 +13,26 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.PopupProperties
+import com.andersonlin.moneybook.util.SoundFeedback
+import com.andersonlin.moneybook.util.SoundType
 
 @Composable
 fun CompactTags(tags: List<String>, selected: List<String>, select: (String)->Unit, add: (String)->Unit) {
     var query by remember { mutableStateOf("") }
     var suggesting by remember { mutableStateOf(false) }
+    val view = LocalView.current
     // 第一排固定高频前5个标签（点击原地高亮，不跳动移位）；第二排展示其余已选自定义标签 + 次高频标签 + 右侧输入框
     val row1Tags = tags.take(5)
     val row2Tags = (selected.filter { it !in row1Tags } + tags.drop(5).take(4)).distinct()
     fun confirm(value: String) {
         val trimmed = value.trim()
         if (trimmed.isNotBlank()) {
+            SoundFeedback.play(view, SoundType.CRISP)
             add(trimmed)
             query = ""
             suggesting = false
@@ -46,7 +51,10 @@ fun CompactTags(tags: List<String>, selected: List<String>, select: (String)->Un
                     val isSelected = tag in selected
                     FilterChip(
                         selected = isSelected,
-                        onClick = { select(tag) },
+                        onClick = {
+                            SoundFeedback.play(view, SoundType.LIGHT)
+                            select(tag)
+                        },
                         modifier = Modifier.height(32.dp),
                         label = {
                             Text(
@@ -76,7 +84,10 @@ fun CompactTags(tags: List<String>, selected: List<String>, select: (String)->Un
                     val isSelected = tag in selected
                     FilterChip(
                         selected = isSelected,
-                        onClick = { select(tag) },
+                        onClick = {
+                            SoundFeedback.play(view, SoundType.LIGHT)
+                            select(tag)
+                        },
                         modifier = Modifier.height(32.dp),
                         label = {
                             Text(

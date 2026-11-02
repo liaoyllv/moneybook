@@ -27,8 +27,8 @@ android {
         applicationId = "com.andersonlin.moneybook"
         minSdk = 28
         targetSdk = 34
-        versionCode = 33
-        versionName = "2.1.12"
+        versionCode = 42
+        versionName = "2.1.21"
     }
 
     signingConfigs {

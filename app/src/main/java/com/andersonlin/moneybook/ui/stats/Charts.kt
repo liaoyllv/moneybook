@@ -18,8 +18,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -102,7 +106,7 @@ fun BarChart(
 }
 
 /**
- * 收支趋势折线（Canvas 自绘，无第三方图表库）。支持 7~31 个数据点。
+ * 收支趋势折线（Canvas 自绘，优雅渐变投影与清晰刻度）。支持 7~31 个数据点。
  */
 @Composable
 fun ExpenseTrendChart(
@@ -112,50 +116,93 @@ fun ExpenseTrendChart(
     modifier: Modifier = Modifier
 ) {
     val every = labelEvery(points.size)
-    Column(modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+    val textColor = MaterialTheme.colorScheme.onSurfaceVariant
+    Column(modifier = modifier.fillMaxWidth().padding(horizontal = 6.dp)) {
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(170.dp)
+                .height(110.dp)
         ) {
             if (points.size < 2) return@Canvas
             val maxValue = points.maxOfOrNull { it.expense }?.coerceAtLeast(1L) ?: 1L
             val stepX = size.width / (points.size - 1)
+            val paddingBottom = 22.dp.toPx()
+            val paddingTop = 10.dp.toPx()
+            val availableHeight = size.height - paddingBottom - paddingTop
+
             val expenseOffsets = points.mapIndexed { index, p ->
                 Offset(
                     x = stepX * index,
-                    y = size.height - (p.expense.toFloat() / maxValue) * (size.height - 16.dp.toPx())
+                    y = paddingTop + (1f - (p.expense.toFloat() / maxValue)) * availableHeight
                 )
             }
 
+            // 1. 柔和渐变填充底色
+            if (expenseOffsets.isNotEmpty()) {
+                val fillPath = Path().apply {
+                    moveTo(expenseOffsets.first().x, size.height - paddingBottom)
+                    expenseOffsets.forEach { lineTo(it.x, it.y) }
+                    lineTo(expenseOffsets.last().x, size.height - paddingBottom)
+                    close()
+                }
+                drawPath(
+                    path = fillPath,
+                    brush = Brush.verticalGradient(
+                        colors = listOf(expenseColor.copy(alpha = 0.22f), Color.Transparent),
+                        startY = paddingTop,
+                        endY = size.height - paddingBottom
+                    )
+                )
+            }
+
+            // 2. 浅色基准线
+            drawLine(
+                color = expenseColor.copy(alpha = 0.15f),
+                start = Offset(0f, size.height - paddingBottom),
+                end = Offset(size.width, size.height - paddingBottom),
+                strokeWidth = 1.dp.toPx()
+            )
+
+            // 3. 走势曲线
             for (i in 0 until expenseOffsets.size - 1) {
                 drawLine(
                     color = expenseColor,
                     start = expenseOffsets[i],
                     end = expenseOffsets[i + 1],
-                    strokeWidth = 3.dp.toPx(),
+                    strokeWidth = 2.5.dp.toPx(),
                     cap = StrokeCap.Round
                 )
-
             }
+
+            // 4. 关键数据点圆环
             points.forEachIndexed { index, p ->
                 if (p.expense > 0) {
-                    drawCircle(expenseColor, radius = 3.dp.toPx(), center = expenseOffsets[index])
+                    drawCircle(
+                        color = expenseColor,
+                        radius = 3.dp.toPx(),
+                        center = expenseOffsets[index]
+                    )
                 }
-
             }
-        }
-        // 底部标签（抽稀显示）
-        Row(Modifier.fillMaxWidth()) {
+
+            // 5. 底部刻度标签直接通过 Canvas 居中绘制，避免 Row 槽位被挤压截断
+            val labelPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                color = textColor.toArgb()
+                textSize = 9.sp.toPx()
+                textAlign = android.graphics.Paint.Align.CENTER
+            }
             points.forEachIndexed { index, point ->
-                Text(
-                    text = if (index % every == 0) point.label else "",
-                    fontSize = 9.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                    modifier = Modifier.weight(1f)
-                )
+                val shouldDraw = index % every == 0 || index == points.lastIndex
+                if (shouldDraw) {
+                    val rawX = stepX * index
+                    val textX = rawX.coerceIn(14.dp.toPx(), size.width - 14.dp.toPx())
+                    drawContext.canvas.nativeCanvas.drawText(
+                        point.label,
+                        textX,
+                        size.height - 4.dp.toPx(),
+                        labelPaint
+                    )
+                }
             }
         }
     }

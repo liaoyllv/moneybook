@@ -7,6 +7,7 @@ import android.content.ContextWrapper
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -34,6 +35,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TimePicker
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import com.andersonlin.moneybook.ui.components.CompactTopBar
+import com.andersonlin.moneybook.ui.components.TopSnackbarHost
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -114,17 +117,14 @@ fun ReminderScreen(
         viewModel.emit("记账提醒已关闭")
     }
 
+    Box(Modifier.fillMaxSize()) {
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            TopAppBar(
+            CompactTopBar(
                 title = { Text("记账提醒") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                }
+                onBack = onBack,
+                height = 40.dp
             )
         }
     ) { padding ->
@@ -227,5 +227,10 @@ fun ReminderScreen(
                 TextButton(onClick = { showTimePicker = false }) { Text("取消") }
             }
         )
+    }
+    TopSnackbarHost(
+        hostState = snackbarHostState,
+        modifier = Modifier.align(Alignment.TopCenter)
+    )
     }
 }

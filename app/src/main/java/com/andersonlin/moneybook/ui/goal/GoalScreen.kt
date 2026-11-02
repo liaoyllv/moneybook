@@ -69,6 +69,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.andersonlin.moneybook.data.model.Goal
 import com.andersonlin.moneybook.ui.AppViewModelProvider
+import com.andersonlin.moneybook.ui.components.CompactTopBar
+import com.andersonlin.moneybook.ui.components.TopSnackbarHost
 import com.andersonlin.moneybook.ui.components.EmptyState
 import com.andersonlin.moneybook.ui.components.EMOJI_CHOICES
 import com.andersonlin.moneybook.util.formatCents
@@ -97,22 +99,19 @@ fun GoalScreen(
         }
     }
 
+    Box(Modifier.fillMaxSize()) {
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            TopAppBar(
+            CompactTopBar(
                 title = { Text("存钱目标") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                },
+                onBack = onBack,
                 actions = {
                     IconButton(onClick = { showAddDialog = true }) {
                         Icon(Icons.Filled.Add, contentDescription = "新建目标")
                     }
-                }
+                },
+                height = 40.dp
             )
         }
     ) { padding ->
@@ -184,6 +183,11 @@ fun GoalScreen(
                 TextButton(onClick = { deleting = null }) { Text("取消") }
             }
         )
+    }
+    TopSnackbarHost(
+        hostState = snackbarHostState,
+        modifier = Modifier.align(Alignment.TopCenter)
+    )
     }
 }
 

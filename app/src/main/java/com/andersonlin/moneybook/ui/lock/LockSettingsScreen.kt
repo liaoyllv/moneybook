@@ -1,6 +1,7 @@
 package com.andersonlin.moneybook.ui.lock
 
 import androidx.biometric.BiometricManager
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -28,6 +29,8 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import com.andersonlin.moneybook.ui.components.CompactTopBar
+import com.andersonlin.moneybook.ui.components.TopSnackbarHost
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -75,17 +78,14 @@ fun LockSettingsScreen(
         }
     }
 
+    Box(Modifier.fillMaxSize()) {
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            TopAppBar(
+            CompactTopBar(
                 title = { Text("应用锁") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                }
+                onBack = onBack,
+                height = 40.dp
             )
         }
     ) { padding ->
@@ -179,6 +179,11 @@ fun LockSettingsScreen(
                 }
             }
         )
+    }
+    TopSnackbarHost(
+        hostState = snackbarHostState,
+        modifier = Modifier.align(Alignment.TopCenter)
+    )
     }
 }
 

@@ -43,6 +43,20 @@ class SettingsViewModel(
             initialValue = ThemeMode.SYSTEM
         )
 
+    val soundEffectsEnabled: StateFlow<Boolean> = settingsRepository.soundEffectsEnabled
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = true
+        )
+
+    val hapticsEnabled: StateFlow<Boolean> = settingsRepository.hapticsEnabled
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = true
+        )
+
     /** 账本列表（CSV 导出选账本用） */
     val ledgers: StateFlow<List<Ledger>> = ledgerRepository.getAllLedgers()
         .stateIn(
@@ -56,6 +70,14 @@ class SettingsViewModel(
 
     fun setThemeMode(mode: ThemeMode) {
         viewModelScope.launch { settingsRepository.setThemeMode(mode) }
+    }
+
+    fun setSoundEffectsEnabled(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.setSoundEffectsEnabled(enabled) }
+    }
+
+    fun setHapticsEnabled(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.setHapticsEnabled(enabled) }
     }
 
     /** 导出加密备份（.mbk：GZIP + AES-256-GCM，密钥为应用锁 PIN 明文派生，跨设备可恢复） */

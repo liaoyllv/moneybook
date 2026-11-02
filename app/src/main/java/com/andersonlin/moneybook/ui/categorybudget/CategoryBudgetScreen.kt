@@ -1,5 +1,6 @@
 package com.andersonlin.moneybook.ui.categorybudget
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -49,6 +50,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.andersonlin.moneybook.data.model.Category
 import com.andersonlin.moneybook.ui.AppViewModelProvider
+import com.andersonlin.moneybook.ui.components.CompactTopBar
+import com.andersonlin.moneybook.ui.components.TopSnackbarHost
 import com.andersonlin.moneybook.util.formatCents
 import com.andersonlin.moneybook.util.monthLabel
 import com.andersonlin.moneybook.util.toCents
@@ -72,17 +75,14 @@ fun CategoryBudgetScreen(
         }
     }
 
+    Box(Modifier.fillMaxSize()) {
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            TopAppBar(
+            CompactTopBar(
                 title = { Text("分类预算") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                }
+                onBack = onBack,
+                height = 40.dp
             )
         }
     ) { padding ->
@@ -142,6 +142,11 @@ fun CategoryBudgetScreen(
                 editingCategory = null
             }
         )
+    }
+    TopSnackbarHost(
+        hostState = snackbarHostState,
+        modifier = Modifier.align(Alignment.TopCenter)
+    )
     }
 }
 

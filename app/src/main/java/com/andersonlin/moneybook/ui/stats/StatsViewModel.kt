@@ -58,6 +58,7 @@ data class StatsUiState(
     val label: String = monthLabel(YearMonth.now()),
     val type: Int = StatsViewModel.TYPE_EXPENSE,
     val chartType: Int = StatsViewModel.CHART_PIE,
+    val anchorDate: LocalDate = LocalDate.now(),
     val slices: List<StatSlice> = emptyList(),
     val total: Long = 0L,
     val canGoNext: Boolean = false,
@@ -71,9 +72,11 @@ data class StatsUiState(
     val currentRecords: List<InsightRecord> = emptyList(),
     val previousRecords: List<InsightRecord> = emptyList(),
     val categoryNames: Map<Long,String> = emptyMap(),
+    val categoryMap: Map<Long, Category> = emptyMap(),
     val categoryMetrics: List<ExpenseMetric> = emptyList(),
     val anomalies: List<ExpenseAnomaly> = emptyList(),
-    val monthComparison: List<DayComparison> = emptyList()
+    val monthComparison: List<DayComparison> = emptyList(),
+    val periodComparison: PeriodComparison = PeriodComparison("", "", emptyList())
 ) {
     val typeLabel: String
         get() = when (type) {
@@ -183,6 +186,7 @@ class StatsViewModel(
             label = result.range.label,
             type = result.query.type,
             chartType = result.query.chartType,
+            anchorDate = result.query.anchor,
             slices = slices,
             total = current.sumOf { it.amount },
             canGoNext = canGoNext,
@@ -195,14 +199,16 @@ class StatsViewModel(
             comparisonLabel=result.window.comparisonLabel,
             currentRecords=current, previousRecords=previous,
             categoryNames=categoryMap.mapValues { it.value.name },
+            categoryMap=categoryMap,
             categoryMetrics=expenseMetrics(current,previous) { (categoryMap[it.categoryId]?.name ?: "未知分类") + if(result.query.type==-1 && it.type==1) "（收入）" else "" },
             anomalies=expenseAnomalies(current,result.records),
-            monthComparison=compareExpenseMonths(result.records,YearMonth.from(result.query.anchor))
+            monthComparison=compareExpenseMonths(result.records,YearMonth.from(result.query.anchor)),
+            periodComparison=compareExpensePeriod(result.records, result.query.scale, result.query.anchor)
         )
     }.flowOn(Dispatchers.Default)
 
     val uiState: StateFlow<StatsUiState> = combine(baseStateFlow, chartType) { base, c ->
-        val canGoNext = if (c == CHART_CALENDAR || c == CHART_BAR) {
+        val canGoNext = if (c == CHART_CALENDAR) {
             base.calendarMonth < YearMonth.now()
         } else {
             base.canGoNext
@@ -233,9 +239,13 @@ class StatsViewModel(
         this.type.value = type
     }
 
+    fun setAnchor(date: LocalDate) {
+        anchor.value = date
+    }
+
     private fun move(delta: Int) {
         val a = anchor.value
-        anchor.value = if(chartType.value==CHART_CALENDAR || chartType.value==CHART_BAR) a.plusMonths(delta.toLong()) else when (scale.value) {
+        anchor.value = if(chartType.value==CHART_CALENDAR) a.plusMonths(delta.toLong()) else when (scale.value) {
             SCALE_DAY -> a.plusDays(delta.toLong())
             SCALE_WEEK -> a.plusWeeks(delta.toLong())
             SCALE_MONTH -> a.plusMonths(delta.toLong())

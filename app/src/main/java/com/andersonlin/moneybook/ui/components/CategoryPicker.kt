@@ -1,5 +1,9 @@
 package com.andersonlin.moneybook.ui.components
 
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -7,8 +11,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import com.andersonlin.moneybook.data.model.Category
+import com.andersonlin.moneybook.util.SoundFeedback
+import com.andersonlin.moneybook.util.SoundType
+import com.andersonlin.moneybook.util.tactileScale
 
 @Composable
 fun CategoryPicker(
@@ -18,20 +26,32 @@ fun CategoryPicker(
     onOrder: (List<Long>) -> Unit
 ) {
     var expanded by rememberSaveable(categories.firstOrNull()?.type) { mutableStateOf(false) }
+    val view = LocalView.current
     val columns = 4
     // 默认展示前 3 排（11 个分类 + 1 个展开按钮），展开展示全部
     val hasOverflow = categories.size > 11
     val visible = if (expanded || !hasOverflow) categories else categories.take(columns * 3 - 1)
 
-    Column(Modifier.fillMaxWidth()) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .animateContentSize(animationSpec = spring(dampingRatio = 0.82f, stiffness = Spring.StiffnessMediumLow))
+    ) {
         Layout(content = {
             visible.forEach { category ->
                 key(category.id) {
+                    val tileInteraction = remember { MutableInteractionSource() }
                     Surface(
-                        onClick = { onSelect(category.id) },
+                        onClick = {
+                            SoundFeedback.play(view, SoundType.CRISP)
+                            onSelect(category.id)
+                        },
+                        interactionSource = tileInteraction,
                         color = if (selected == category.id) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
                         shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
-                        modifier = Modifier.padding(horizontal = 2.dp, vertical = 2.dp)
+                        modifier = Modifier
+                            .padding(horizontal = 2.dp, vertical = 2.dp)
+                            .tactileScale(tileInteraction, scaleDown = 0.93f)
                     ) {
                         Row(
                             Modifier
@@ -48,9 +68,16 @@ fun CategoryPicker(
                 }
             }
             if (hasOverflow && !expanded) {
+                val moreInteraction = remember { MutableInteractionSource() }
                 Surface(
-                    onClick = { expanded = true },
-                    modifier = Modifier.padding(horizontal = 2.dp, vertical = 2.dp),
+                    onClick = {
+                        SoundFeedback.play(view, SoundType.LIGHT)
+                        expanded = true
+                    },
+                    interactionSource = moreInteraction,
+                    modifier = Modifier
+                        .padding(horizontal = 2.dp, vertical = 2.dp)
+                        .tactileScale(moreInteraction, scaleDown = 0.92f),
                     shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant
                 ) {
@@ -75,7 +102,10 @@ fun CategoryPicker(
         if (expanded && hasOverflow) {
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                 TextButton(
-                    onClick = { expanded = false },
+                    onClick = {
+                        SoundFeedback.play(view, SoundType.LIGHT)
+                        expanded = false
+                    },
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)
                 ) {
                     Text("收起分类 ▴", style = MaterialTheme.typography.labelMedium)

@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import com.andersonlin.moneybook.BuildConfig
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -33,11 +34,15 @@ import androidx.compose.material.icons.filled.Savings
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material.icons.filled.Upload
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
+import com.andersonlin.moneybook.ui.components.CompactCenterTopBar
+import com.andersonlin.moneybook.ui.components.TopSnackbarHost
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -46,6 +51,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -72,6 +78,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.andersonlin.moneybook.MainActivity
 import com.andersonlin.moneybook.data.settings.ThemeMode
 import com.andersonlin.moneybook.ui.AppViewModelProvider
+import com.andersonlin.moneybook.util.SoundFeedback
+import com.andersonlin.moneybook.util.SoundType
+import androidx.compose.ui.platform.LocalView
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
@@ -99,9 +108,12 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = viewModel(factory = AppViewModelProvider.Factory)
 ) {
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
+    val soundEffectsEnabled by viewModel.soundEffectsEnabled.collectAsStateWithLifecycle()
+    val hapticsEnabled by viewModel.hapticsEnabled.collectAsStateWithLifecycle()
     val ledgers by viewModel.ledgers.collectAsStateWithLifecycle()
     val lockHasPin by viewModel.lockHasPin.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val view = LocalView.current
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -136,10 +148,15 @@ fun SettingsScreen(
         }
     }
 
+    Box(Modifier.fillMaxSize()) {
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = { CenterAlignedTopAppBar(title = { Text("设置") }) }
+        topBar = {
+            CompactCenterTopBar(
+                title = { Text("设置") },
+                height = 40.dp
+            )
+        }
     ) { padding ->
         Column(
             modifier = Modifier
@@ -224,6 +241,41 @@ fun SettingsScreen(
                     SettingsRow(Icons.Filled.Lock, "应用锁（密码 / 指纹）", onLockSettings)
                     HorizontalDivider(Modifier.padding(horizontal = 16.dp))
                     SettingsRow(Icons.Filled.Notifications, "记账提醒（每日通知）", onManageReminder)
+                }
+            }
+
+            SettingsSectionHeader("声音与触感")
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            ) {
+                Column {
+                    SettingsSwitchRow(
+                        icon = Icons.Filled.VolumeUp,
+                        title = "清脆按键音效",
+                        subtitle = "点击按钮、分类、标签时的干净利落微击音",
+                        checked = soundEffectsEnabled,
+                        onCheckedChange = {
+                            viewModel.setSoundEffectsEnabled(it)
+                            if (it) SoundFeedback.play(view, SoundType.CRISP)
+                        }
+                    )
+                    HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                    SettingsSwitchRow(
+                        icon = Icons.Filled.Vibration,
+                        title = "按键触感震动",
+                        subtitle = "操作时伴随轻柔物理微震动",
+                        checked = hapticsEnabled,
+                        onCheckedChange = {
+                            viewModel.setHapticsEnabled(it)
+                            if (it) SoundFeedback.play(view, SoundType.LIGHT)
+                        }
+                    )
                 }
             }
 
@@ -494,6 +546,11 @@ fun SettingsScreen(
             }
         )
     }
+    TopSnackbarHost(
+        hostState = snackbarHostState,
+        modifier = Modifier.align(Alignment.TopCenter)
+    )
+    }
 }
 
 @Composable
@@ -563,10 +620,14 @@ private fun AuthorContactRow(
 
 @Composable
 private fun SettingsRow(icon: ImageVector, title: String, onClick: () -> Unit) {
+    val view = LocalView.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .clickable {
+                SoundFeedback.play(view, SoundType.LIGHT)
+                onClick()
+            }
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -586,6 +647,46 @@ private fun SettingsRow(icon: ImageVector, title: String, onClick: () -> Unit) {
             Icons.Filled.ChevronRight,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.outline
+        )
+    }
+}
+
+@Composable
+private fun SettingsSwitchRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(22.dp)
+        )
+        Spacer(Modifier.width(16.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange
         )
     }
 }

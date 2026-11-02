@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -38,6 +39,8 @@ import coil.request.ImageRequest
 import com.andersonlin.moneybook.data.model.Account
 import com.andersonlin.moneybook.data.model.Bill
 import com.andersonlin.moneybook.data.model.Category
+import com.andersonlin.moneybook.util.SoundFeedback
+import com.andersonlin.moneybook.util.SoundType
 import com.andersonlin.moneybook.util.dateLabel
 import com.andersonlin.moneybook.util.formatCents
 
@@ -64,8 +67,12 @@ fun BillRow(
     showDate: Boolean = true,
     onClick: () -> Unit
 ) {
+    val view = LocalView.current
     Surface(
-        onClick = onClick,
+        onClick = {
+            SoundFeedback.play(view, SoundType.LIGHT)
+            onClick()
+        },
         color = Color.Transparent,
         shape = RoundedCornerShape(12.dp)
     ) {

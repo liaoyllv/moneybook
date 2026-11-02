@@ -5,6 +5,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -23,8 +24,12 @@ import com.andersonlin.moneybook.util.formatCents
 
 @Composable
 internal fun MonthComparisonContent(state: StatsUiState) {
-    val rows = state.monthComparison
-    var selected by remember(state.calendarMonth) { mutableStateOf(1) }
+    val comparison = state.periodComparison
+    val rows = comparison.items
+    var selectedIndex by remember(comparison) {
+        val todayIdx = rows.indexOfLast { (it.current != null && it.current > 0) || it.index == state.anchorDate.dayOfMonth }
+        mutableStateOf(if (todayIdx >= 0) todayIdx else 0)
+    }
     val currentColor = MaterialTheme.colorScheme.primary
     val previousColor = MaterialTheme.colorScheme.tertiary
     val axisColor = MaterialTheme.colorScheme.outlineVariant
@@ -36,36 +41,43 @@ internal fun MonthComparisonContent(state: StatsUiState) {
         Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text("同日支出对比", style = MaterialTheme.typography.titleMedium)
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("↑ 所选月（${state.calendarMonth.monthValue}月）", color = currentColor, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
-            Text("↓ 上个月（${state.calendarMonth.minusMonths(1).monthValue}月）", color = previousColor, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("收支对比", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(comparison.currentTitle, color = currentColor, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.width(8.dp))
+                Text(comparison.previousTitle, color = previousColor, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
+            }
         }
-        Text("两侧共用刻度 · 单日最高 ¥${formatCents(maxValue)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+        Text("两侧共用刻度 · 最高 ¥${formatCents(maxValue)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
 
         Canvas(
             Modifier
                 .fillMaxWidth()
-                .height(260.dp)
-                .semantics { contentDescription = "同日支出对比，上方为所选月，下方为上月。可使用下方前一天、后一天查看数值。" }
+                .height(120.dp)
+                .semantics { contentDescription = "支出对比，上方为所选期，下方为对比期。" }
                 .pointerInput(rows) {
                     detectTapGestures { p ->
                         if (rows.isNotEmpty()) {
-                            selected = (p.x / size.width * rows.size).toInt().coerceIn(0, rows.lastIndex) + 1
+                            selectedIndex = (p.x / size.width * rows.size).toInt().coerceIn(0, rows.lastIndex)
                         }
                     }
                 }
         ) {
             if (rows.isEmpty()) return@Canvas
             val center = size.height / 2
-            val bandHalf = 11.dp.toPx()
-            val half = center - bandHalf - 12.dp.toPx()
+            val bandHalf = 8.dp.toPx()
+            val half = center - bandHalf - 2.dp.toPx()
             val step = size.width / rows.size
 
-            // 绘制中央日期刻度带与上下边界线
+            // 绘制中央刻度带与上下边界线
             drawRect(
                 color = bandColor,
                 topLeft = Offset(0f, center - bandHalf),
@@ -76,7 +88,7 @@ internal fun MonthComparisonContent(state: StatsUiState) {
 
             val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
                 color = textColor.toArgb()
-                textSize = 9.sp.toPx()
+                textSize = (if (rows.size <= 7) 11.sp else 8.5.sp).toPx()
                 textAlign = android.graphics.Paint.Align.CENTER
             }
             val fontMetrics = paint.fontMetrics
@@ -84,21 +96,21 @@ internal fun MonthComparisonContent(state: StatsUiState) {
 
             rows.forEachIndexed { index, row ->
                 val x = step * index
-                val barWidth = step * 0.65f
+                val barWidth = (step * (if (rows.size <= 7) 0.5f else 0.65f)).coerceAtLeast(2.dp.toPx())
 
-                // 上方：所选月份支出柱状
+                // 上方：所选期柱状
                 row.current?.takeIf { it > 0 }?.let { value ->
                     val h = (half * value / maxValue).coerceAtLeast(2.dp.toPx())
-                    drawRect(currentColor, Offset(x + step * 0.175f, center - bandHalf - 2.dp.toPx() - h), Size(barWidth, h))
+                    drawRect(currentColor, Offset(x + (step - barWidth) / 2, center - bandHalf - 1.dp.toPx() - h), Size(barWidth, h))
                 }
-                // 下方：上月份支出柱状
+                // 下方：对比期柱状
                 row.previous?.takeIf { it > 0 }?.let { value ->
                     val h = (half * value / maxValue).coerceAtLeast(2.dp.toPx())
-                    drawRect(previousColor, Offset(x + step * 0.175f, center + bandHalf + 2.dp.toPx()), Size(barWidth, h))
+                    drawRect(previousColor, Offset(x + (step - barWidth) / 2, center + bandHalf + 1.dp.toPx()), Size(barWidth, h))
                 }
 
-                // 选中日期指示列
-                if (row.day == selected) {
+                // 选中指示列
+                if (index == selectedIndex) {
                     drawRect(
                         color = textColor.copy(alpha = 0.12f),
                         topLeft = Offset(x, 0f),
@@ -106,57 +118,78 @@ internal fun MonthComparisonContent(state: StatsUiState) {
                     )
                 }
 
-                // 日期文字：防重叠抽稀规则（1号、逢5号且离月末>=2天、以及月末最后一天）
-                val isDrawDay = row.day == 1 || (row.day % 5 == 0 && (rows.size - row.day) >= 2) || row.day == rows.size
-                if (isDrawDay) {
-                    drawContext.canvas.nativeCanvas.drawText(row.day.toString(), x + step / 2, textBaseY, paint)
+                // 刻度文字：<=12 项全画，多项抽稀
+                val isDrawLabel = when {
+                    rows.size <= 12 -> true
+                    row.index == 1 || (row.index % 5 == 0 && (rows.size - row.index) >= 2) || row.index == rows.size -> true
+                    else -> false
+                }
+                if (isDrawLabel) {
+                    drawContext.canvas.nativeCanvas.drawText(row.label, x + step / 2, textBaseY, paint)
                 }
             }
         }
 
-        rows.getOrNull(selected - 1)?.let { day ->
+        rows.getOrNull(selectedIndex)?.let { item ->
             Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                shape = MaterialTheme.shapes.medium
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                shape = RoundedCornerShape(12.dp)
             ) {
-                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
                     Row(
                         Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        TextButton(onClick = { selected-- }, enabled = selected > 1) { Text("前一天") }
-                        Text("${day.day}号", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        TextButton(onClick = { selected++ }, enabled = selected < rows.size) { Text("后一天") }
+                        TextButton(
+                            onClick = { if (selectedIndex > 0) selectedIndex-- },
+                            enabled = selectedIndex > 0,
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                        ) {
+                            Text("前一个", style = MaterialTheme.typography.labelSmall)
+                        }
+                        Text(item.subLabel, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                        TextButton(
+                            onClick = { if (selectedIndex < rows.lastIndex) selectedIndex++ },
+                            enabled = selectedIndex < rows.lastIndex,
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                        ) {
+                            Text("后一个", style = MaterialTheme.typography.labelSmall)
+                        }
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Column(Modifier.weight(1f)) {
-                            Text("${state.calendarMonth.monthValue}月${day.day}日", style = MaterialTheme.typography.labelMedium)
+                            Text("本期（${item.subLabel}）", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(
-                                day.current?.let { "¥" + formatCents(it) } ?: "未到或无此日期",
-                                style = MaterialTheme.typography.titleMedium,
+                                item.current?.let { "¥" + formatCents(it) } ?: "未到或无数据",
+                                style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = currentColor
                             )
-                            if (day.current != null) Text("${day.currentCount}笔记录", style = MaterialTheme.typography.labelSmall)
+                            if (item.current != null) Text("${item.currentCount}笔记录", style = MaterialTheme.typography.labelSmall)
                         }
                         Column(Modifier.weight(1f)) {
-                            Text("${state.calendarMonth.minusMonths(1).monthValue}月${day.day}日", style = MaterialTheme.typography.labelMedium)
+                            Text("上期（${item.prevSubLabel}）", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(
-                                day.previous?.let { "¥" + formatCents(it) } ?: "无此日期",
-                                style = MaterialTheme.typography.titleMedium,
+                                item.previous?.let { "¥" + formatCents(it) } ?: "无数据",
+                                style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = previousColor
                             )
-                            if (day.previous != null) Text("${day.previousCount}笔记录", style = MaterialTheme.typography.labelSmall)
+                            if (item.previous != null) Text("${item.previousCount}笔记录", style = MaterialTheme.typography.labelSmall)
                         }
                     }
-                    if (day.current != null && day.previous != null) {
-                        val delta = day.current - day.previous
+                    if (item.current != null && item.previous != null) {
+                        val delta = item.current - item.previous
                         val deltaColor = if (delta > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
                         Text(
-                            text = "记录金额较上月同日 ${if (delta >= 0) "+" else "−"}¥${formatCents(kotlin.math.abs(delta))}",
-                            style = MaterialTheme.typography.bodyMedium,
+                            text = "较上期 ${if (delta >= 0) "+" else "−"}¥${formatCents(kotlin.math.abs(delta))}",
+                            style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Medium,
                             color = deltaColor
                         )
@@ -164,7 +197,70 @@ internal fun MonthComparisonContent(state: StatsUiState) {
                 }
             }
         }
-        Text("横向按日期对齐；点柱子或按按钮查看同日金额。未到来的日期与不存在的日期留空。", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
-        Spacer(Modifier.height(12.dp))
+
+        // 全周期累计对比卡片：充实下方空间，一屏完整呈现
+        val currentTotal = rows.mapNotNull { it.current }.sum()
+        val previousTotal = rows.mapNotNull { it.previous }.sum()
+        val periodDelta = currentTotal - previousTotal
+        val periodDeltaPercent = if (previousTotal > 0) (periodDelta * 100.0 / previousTotal) else 0.0
+        val deltaColor = if (periodDelta > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+
+        val validCurrentDays = rows.count { it.current != null }
+        val currentDailyAvg = if (validCurrentDays > 0) currentTotal / validCurrentDays else 0L
+        val validPrevDays = rows.count { it.previous != null }
+        val prevDailyAvg = if (validPrevDays > 0) previousTotal / validPrevDays else 0L
+
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text("全周期累计对比", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("本期累计支出", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(1.dp))
+                        Text("¥" + formatCents(currentTotal), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = currentColor)
+                        Text("日均 ¥${formatCents(currentDailyAvg)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text("上期累计支出", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(1.dp))
+                        Text("¥" + formatCents(previousTotal), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = previousColor)
+                        Text("日均 ¥${formatCents(prevDailyAvg)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                    }
+                }
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                ) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("两期差额", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            text = "${if (periodDelta >= 0) "较上期 +" else "较上期 −"}¥${formatCents(kotlin.math.abs(periodDelta))} (${if (periodDelta >= 0) "+" else ""}${"%.1f".format(periodDeltaPercent)}%)",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = deltaColor
+                        )
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
     }
 }

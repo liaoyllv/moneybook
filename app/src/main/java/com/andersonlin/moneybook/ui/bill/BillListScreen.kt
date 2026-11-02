@@ -47,6 +47,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.andersonlin.moneybook.data.model.Bill
 import com.andersonlin.moneybook.ui.AppViewModelProvider
+import com.andersonlin.moneybook.ui.components.CompactTopBar
 import com.andersonlin.moneybook.ui.components.BillRow
 import com.andersonlin.moneybook.ui.components.EmptyState
 import com.andersonlin.moneybook.util.formatCents
@@ -67,13 +68,14 @@ fun BillListScreen(
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
-            TopAppBar(
+            CompactTopBar(
                 title = { Text("账单") },
                 actions = {
                     IconButton(onClick = onAddBill) {
                         Icon(Icons.Filled.Add, contentDescription = "记一笔")
                     }
-                }
+                },
+                height = 40.dp
             )
         }
     ) { padding ->
@@ -190,7 +192,7 @@ fun BillListScreen(
 }
 
 @Composable
-private fun AmountFilterDialog(
+internal fun AmountFilterDialog(
     onDismiss: () -> Unit,
     onApply: (Long?, Long?) -> Unit
 ) {
@@ -237,7 +239,7 @@ private fun AmountFilterDialog(
     )
 }
 
-private fun amountLabel(minCents: Long?, maxCents: Long?): String = when {
+internal fun amountLabel(minCents: Long?, maxCents: Long?): String = when {
     minCents != null && maxCents != null -> "¥${formatCentsPlain(minCents)}-${formatCentsPlain(maxCents)}"
     minCents != null -> "≥¥${formatCentsPlain(minCents)}"
     maxCents != null -> "≤¥${formatCentsPlain(maxCents)}"
@@ -245,7 +247,7 @@ private fun amountLabel(minCents: Long?, maxCents: Long?): String = when {
 }
 
 @Composable
-private fun MonthHeaderRow(header: BillListRow.Header) {
+internal fun MonthHeaderRow(header: BillListRow.Header) {
     Row(
         modifier = Modifier
             .fillMaxWidth()

@@ -1,5 +1,6 @@
 package com.andersonlin.moneybook.ui.budget
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -40,6 +41,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -47,8 +50,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.andersonlin.moneybook.data.model.Budget
 import com.andersonlin.moneybook.ui.AppViewModelProvider
+import com.andersonlin.moneybook.ui.components.CompactTopBar
+import com.andersonlin.moneybook.ui.components.TopSnackbarHost
 import com.andersonlin.moneybook.util.formatCents
 import com.andersonlin.moneybook.util.monthLabel
+import com.andersonlin.moneybook.util.SoundFeedback
+import com.andersonlin.moneybook.util.SoundType
 import java.time.YearMonth
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -61,6 +68,8 @@ fun BudgetScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     var month by remember { mutableStateOf(YearMonth.now()) }
     var amountText by remember { mutableStateOf("") }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val view = LocalView.current
 
     LaunchedEffect(Unit) {
         viewModel.events.collect { event ->
@@ -70,17 +79,14 @@ fun BudgetScreen(
         }
     }
 
+    Box(Modifier.fillMaxSize()) {
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            TopAppBar(
+            CompactTopBar(
                 title = { Text("月度预算") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                }
+                onBack = onBack,
+                height = 40.dp
             )
         }
     ) { padding ->
@@ -132,7 +138,10 @@ fun BudgetScreen(
                         Button(
                             onClick = {
                                 if (amountText.isNotBlank()) {
+                                    SoundFeedback.play(view, SoundType.CRISP)
+                                    keyboardController?.hide()
                                     viewModel.setBudget(month.year, month.monthValue, amountText)
+                                    onBack()
                                 }
                             },
                             modifier = Modifier.fillMaxWidth()
@@ -167,6 +176,11 @@ fun BudgetScreen(
                 }
             }
         }
+    }
+    TopSnackbarHost(
+        hostState = snackbarHostState,
+        modifier = Modifier.align(Alignment.TopCenter)
+    )
     }
 }
 

@@ -1,3 +1,5 @@
+# 记一笔（MoneyBook）版本控制忽略规则
+# 软件版本：v2.1.21 ｜ 代码仓库：https://github.com/liaoyllv/moneybook
 *.iml
 .gradle
 /local.properties
@@ -18,5 +20,5 @@ build/
 /tools/
 # 发布签名密钥库，不提交
 /keystore/
-# 本地整理好的安装包，不提交
+# 本地打包与安装包缓存，不提交
 /安装包/

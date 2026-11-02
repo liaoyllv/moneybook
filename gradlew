@@ -1,4 +1,6 @@
 #!/bin/sh
+# MoneyBook (记一笔) Gradle Wrapper Script - v2.1.21
+# https://github.com/liaoyllv/moneybook
 
 #
 # Copyright © 2015-2021 the original authors.

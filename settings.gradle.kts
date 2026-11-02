@@ -1,6 +1,8 @@
+// 记一笔（MoneyBook）模块编排与依赖源配置
+// 软件版本：v2.1.21 ｜ 代码仓库：https://github.com/liaoyllv/moneybook
 pluginManagement {
     repositories {
-        // 国内镜像优先，境外官方源兜底
+        // 国内阿里云镜像源加速，官方镜像兜底
         maven("https://maven.aliyun.com/repository/gradle-plugin")
         maven("https://maven.aliyun.com/repository/google")
         maven("https://maven.aliyun.com/repository/central")

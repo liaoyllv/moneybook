@@ -1,3 +1,5 @@
+@rem MoneyBook (记一笔) Gradle Wrapper Script - v2.1.21
+@rem https://github.com/liaoyllv/moneybook
 @rem
 @rem Copyright 2015 the original author or authors.
 @rem

@@ -1,3 +1,5 @@
+# 记一笔（MoneyBook）依赖版本清单（Version Catalog）
+# 软件版本：v2.1.21 ｜ 代码仓库：https://github.com/liaoyllv/moneybook
 [versions]
 agp = "8.5.2"
 kotlin = "1.9.24"

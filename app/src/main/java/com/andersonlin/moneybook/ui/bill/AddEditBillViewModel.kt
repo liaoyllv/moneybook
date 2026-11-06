@@ -73,18 +73,18 @@ class AddEditBillViewModel(
     private var bill: Bill? = null
     private var saving = false
     private var accountChosen = false
-    private var categoryCountsMap: Map<Long, Int> =
-        billRepository.getWarmCategoryCounts(ledgerRepository.cachedActiveLedgerId)
+    private var categoryHeatMap: Map<Long, Int> =
+        billRepository.getWarmCategoryHeat(ledgerRepository.cachedActiveLedgerId)
     private var tagSuggestionsMap: Map<Long, List<String>> =
         billRepository.getWarmTagSuggestions(ledgerRepository.cachedActiveLedgerId)
     private var flowsStarted = false
 
     private fun warmCategoriesForType(type: Int): List<Category> {
-        val counts = categoryCountsMap
+        val heat = categoryHeatMap
         return categoryRepository.cachedCategories
             .filter { it.type == type }
             .sortedWith(
-                compareByDescending<Category> { counts[it.id] ?: 0 }
+                compareByDescending<Category> { heat[it.id] ?: 0 }
                     .thenBy { it.sortOrder }
                     .thenBy { it.id }
             )
@@ -96,7 +96,7 @@ class AddEditBillViewModel(
         accountChosen = false
         val todayEpochDay = LocalDate.now().toEpochDay()
         val activeLedgerId = ledgerRepository.cachedActiveLedgerId
-        categoryCountsMap = billRepository.getWarmCategoryCounts(activeLedgerId).ifEmpty { categoryCountsMap }
+        categoryHeatMap = billRepository.getWarmCategoryHeat(activeLedgerId).ifEmpty { categoryHeatMap }
         tagSuggestionsMap = billRepository.getWarmTagSuggestions(activeLedgerId).ifEmpty { tagSuggestionsMap }
 
         if (!flowsStarted) {
@@ -115,7 +115,7 @@ class AddEditBillViewModel(
                     }
             }
 
-            // 2. 当前类型的分类列表 + 分类使用频次联合排序（消除竞态）
+            // 2. 当前类型的分类列表 + 分类使用热度动态排序（按近期与全量综合加权）
             viewModelScope.launch {
                 combine(
                     _uiState
@@ -124,12 +124,12 @@ class AddEditBillViewModel(
                         .flatMapLatest { type ->
                             categoryRepository.getCategoriesByType(type).map { type to it }
                         },
-                    ledgerRepository.activeLedgerId.flatMapLatest { billRepository.getCategoryCounts(it) }
-                ) { (type, categories), countList ->
-                    val counts = countList.associate { it.categoryId to it.count }
-                    categoryCountsMap = counts
+                    ledgerRepository.activeLedgerId.flatMapLatest { billRepository.getCategoryHeat(it) }
+                ) { (type, categories), heatList ->
+                    val heat = heatList.associate { it.categoryId to it.heat }
+                    categoryHeatMap = heat
                     type to categories.sortedWith(
-                        compareByDescending<Category> { counts[it.id] ?: 0 }
+                        compareByDescending<Category> { heat[it.id] ?: 0 }
                             .thenBy { it.sortOrder }
                             .thenBy { it.id }
                     )
@@ -186,7 +186,7 @@ class AddEditBillViewModel(
                             type = b.type,
                             amountText = formatCentsPlain(b.amountCents),
                             note = b.note,
-                            tags = tagsOf(b.tags),
+                            tags = tagsOf(b.tags).take(1),
                             dateEpochDay = b.dateEpochDay,
                             categoryId = b.categoryId,
                             accountId = b.accountId,
@@ -273,14 +273,18 @@ class AddEditBillViewModel(
     }
 
     fun addTag(value: String) {
-        val tag=value.trim().replace("\n"," ").take(30)
-        if(tag !in _uiState.value.tags) toggleTag(tag)
+        val tag = value.trim().replace("\n", " ").take(30)
+        if (tag.isNotEmpty()) {
+            _uiState.update { it.copy(tags = listOf(tag)) }
+        }
     }
 
     fun toggleTag(value: String) {
         val tag = value.trim().replace("\n", " ").take(30)
-        if(tag.isEmpty()) return
-        _uiState.update { it.copy(tags=if(tag in it.tags) it.tags-tag else it.tags+tag) }
+        if (tag.isEmpty()) return
+        _uiState.update {
+            it.copy(tags = if (tag in it.tags) emptyList() else listOf(tag))
+        }
     }
 
     fun reorderCategories(ids: List<Long>) { viewModelScope.launch {

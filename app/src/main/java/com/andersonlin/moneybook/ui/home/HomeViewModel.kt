@@ -82,8 +82,9 @@ class HomeViewModel(
         viewModelScope.launch(Dispatchers.Default) {
             ledgerRepository.activeLedgerId
                 .flatMapLatest { id ->
+                    billRepository.refreshWarmCategoryHeat(id)
                     billRepository.getCachedTagSuggestions(id)
-                    billRepository.getCategoryCounts(id)
+                    billRepository.getCategoryHeat(id)
                 }
                 .collect {}
         }

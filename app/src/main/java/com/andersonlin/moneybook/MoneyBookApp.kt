@@ -78,6 +78,26 @@ class MoneyBookApp : Application() {
                     }
                 }
                 recurringRepository.generateDue()
+                // 合并冗余分类：住宿 -> 住房，捐赠 -> 其他
+                suspend fun mergeCategory(sourceName: String, targetName: String) {
+                    val all = categoryRepository.getAllSnapshot()
+                    val source = all.firstOrNull { it.name == sourceName } ?: return
+                    val target = all.firstOrNull { it.name == targetName && it.type == source.type }
+                        ?: run {
+                            val dummy = com.andersonlin.moneybook.data.model.Category(
+                                name = targetName,
+                                type = source.type,
+                                icon = "💰",
+                                isDefault = false,
+                                sortOrder = all.size + 1
+                            ).withSuggestedIcon()
+                            categoryRepository.insertAll(listOf(dummy))
+                            categoryRepository.getAllSnapshot().firstOrNull { it.name == targetName && it.type == source.type }
+                        } ?: return
+                    categoryRepository.merge(source.id, target.id)
+                }
+                mergeCategory("住宿", "住房")
+                mergeCategory("捐赠", "其他")
             }
         }
         // 启动时同步记账提醒调度（已开启则按设定时间重新调度）

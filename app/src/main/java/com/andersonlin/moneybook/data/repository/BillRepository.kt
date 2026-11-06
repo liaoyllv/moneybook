@@ -2,6 +2,7 @@ package com.andersonlin.moneybook.data.repository
 
 import com.andersonlin.moneybook.data.db.BillDao
 import com.andersonlin.moneybook.data.model.Bill
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.onEach
 
 /** 账单仓库：对 DAO 的薄封装，ViewModel 只依赖 Repository。查询均按账本隔离。 */
@@ -46,6 +47,34 @@ class BillRepository(private val dao: BillDao) {
 
     fun invalidateTagCache() {
         cachedTagSuggestions = null
+    }
+
+    @Volatile
+    private var cachedCategoryHeatLedgerId: Long = -1L
+    @Volatile
+    private var cachedCategoryHeat: Map<Long, Int> = emptyMap()
+
+    fun getWarmCategoryHeat(ledgerId: Long): Map<Long, Int> =
+        if (cachedCategoryHeatLedgerId == ledgerId) cachedCategoryHeat else emptyMap()
+
+    fun updateWarmCategoryHeat(ledgerId: Long, heat: Map<Long, Int>) {
+        cachedCategoryHeatLedgerId = ledgerId
+        cachedCategoryHeat = heat
+    }
+
+    suspend fun refreshWarmCategoryHeat(ledgerId: Long): Map<Long, Int> {
+        val today = java.time.LocalDate.now().toEpochDay()
+        val list = dao.getCategoryHeatSnapshot(ledgerId, today - 30, today - 90)
+        val heatMap = list.associate { it.categoryId to it.heat }
+        updateWarmCategoryHeat(ledgerId, heatMap)
+        return heatMap
+    }
+
+    fun getCategoryHeat(ledgerId: Long): Flow<List<BillDao.CategoryHeat>> {
+        val today = java.time.LocalDate.now().toEpochDay()
+        return dao.getCategoryHeat(ledgerId, today - 30, today - 90).onEach { list ->
+            updateWarmCategoryHeat(ledgerId, list.associate { it.categoryId to it.heat })
+        }
     }
 
     fun getWarmTagSuggestions(ledgerId: Long): Map<Long, List<String>> =

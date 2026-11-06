@@ -2,7 +2,7 @@
 
 > 一款极致轻快、纯粹本地离线运行的 Android 个人记账应用。**零网络权限、零广告追踪、零账号体系**，所有数据严格保存在设备本地。
 
-[![Release](https://img.shields.io/badge/Release-v2.1.21-brightgreen)](https://github.com/liaoyllv/moneybook/releases/latest)
+[![Release](https://img.shields.io/badge/Release-v2.1.22-brightgreen)](https://github.com/liaoyllv/moneybook/releases/latest)
 ![Android](https://img.shields.io/badge/Android-9.0%2B-3DDC84)
 ![Kotlin](https://img.shields.io/badge/Kotlin-1.9.24-7F52FF)
 ![Compose](https://img.shields.io/badge/Compose-Material_3-4285F4)
@@ -14,7 +14,18 @@
 
 ---
 
-## 🌟 v2.1.21 核心重构与全新特性
+## 🌟 v2.1.22 全新优化与特性更新
+
+在 **v2.1.22** 版本中，针对高频日常记账体验进行了进一步微调优化：
+1. **标签栏单排横滑与严格单选**：标签栏收敛为 32dp 单排平滑横向滑动，严格单选互斥，按历史使用频次智能降序排序，点选即录。
+2. **新标签输入框与日历选择同行并列**：左侧支持即时输入新标签与历史匹配联想（带确认打勾），右侧并列全功能日历选择器，省去整行纵向高度。
+3. **备注与附件紧凑排版**：左侧轻量单行备注输入框，右侧微型附件/图片胶囊，所有控件高度收拢至 ~330dp，实现全屏零滑动极速记账。
+4. **账单类目近期活跃度动态加权排序**：引入近 30/90 天加权算法（Heat = Total + 9×Count_30d + 3×Count_90d），常用类目（如宠物、亲友）自动前置。
+5. **入场自动聚焦与键盘无缝呼出**：进入「记一笔」时自动聚焦金额框并平滑唤起软键盘，即点即输。
+
+---
+
+## 🌟 v2.1.21 核心重构与历史特性
 
 在 **v2.1.21** 版本中，项目根据日常真实高频记账痛点，完成了从交互架构到视觉体系的重大重构升级：
 

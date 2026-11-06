@@ -116,6 +116,30 @@ interface BillDao {
     @Query("SELECT COUNT(*) FROM bills WHERE categoryId = :categoryId")
     suspend fun countByCategory(categoryId: Long): Int
 
+    data class CategoryHeat(val categoryId: Long, val heat: Int)
+
+    @Query("""
+        SELECT categoryId, 
+               (COUNT(*) + 
+                SUM(CASE WHEN dateEpochDay >= :epochDay30 THEN 9 ELSE 0 END) + 
+                SUM(CASE WHEN dateEpochDay >= :epochDay90 THEN 3 ELSE 0 END)) AS heat 
+        FROM bills 
+        WHERE ledgerId = :ledgerId 
+        GROUP BY categoryId
+    """)
+    fun getCategoryHeat(ledgerId: Long, epochDay30: Long, epochDay90: Long): Flow<List<CategoryHeat>>
+
+    @Query("""
+        SELECT categoryId, 
+               (COUNT(*) + 
+                SUM(CASE WHEN dateEpochDay >= :epochDay30 THEN 9 ELSE 0 END) + 
+                SUM(CASE WHEN dateEpochDay >= :epochDay90 THEN 3 ELSE 0 END)) AS heat 
+        FROM bills 
+        WHERE ledgerId = :ledgerId 
+        GROUP BY categoryId
+    """)
+    suspend fun getCategoryHeatSnapshot(ledgerId: Long, epochDay30: Long, epochDay90: Long): List<CategoryHeat>
+
     data class CategoryCount(val categoryId: Long, val count: Int)
 
     @Query("SELECT categoryId, COUNT(*) AS count FROM bills WHERE ledgerId = :ledgerId GROUP BY categoryId")

@@ -33,6 +33,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AttachFile
@@ -133,6 +134,21 @@ fun AddEditBillScreen(
 
     LaunchedEffect(billId, initialDate) { viewModel.init(billId, defaultType, initialDate) }
 
+    // 进入记一笔默认聚焦金额输入框并展开键盘
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(220)
+        try {
+            amountFocusRequester.requestFocus()
+            keyboardController?.show()
+        } catch (_: Exception) {
+            kotlinx.coroutines.delay(120)
+            try {
+                amountFocusRequester.requestFocus()
+                keyboardController?.show()
+            } catch (_: Exception) {}
+        }
+    }
+
     LaunchedEffect(Unit) {
         viewModel.events.collect { event ->
             when (event) {
@@ -147,6 +163,7 @@ fun AddEditBillScreen(
                     (appContext as? MoneyBookApp)?.requestWidgetUpdate()
                     snackbarHostState.showSnackbar("已保存，继续记下一笔")
                     amountFocusRequester.requestFocus()
+                    keyboardController?.show()
                 }
                 AddEditEvent.Deleted -> {
                     focusManager.clearFocus()
@@ -430,35 +447,133 @@ fun AddEditBillScreen(
                 )
             }
 
-            Spacer(Modifier.height(6.dp))
-
-            key(state.categoryId) {
-                com.andersonlin.moneybook.ui.components.CompactTags(
-                    state.tagSuggestions,state.tags,viewModel::toggleTag,viewModel::addTag)
-            }
-
             Spacer(Modifier.height(4.dp))
 
-            // 日期与附件快捷条（单行收拢，右侧附件图标/缩略胶囊）
-            var attachmentMenuExpanded by remember { mutableStateOf(false) }
+            // 1. 标签栏：单排，基于使用频率降序排列，支持左右平滑滑动与单选互斥
+            key(state.categoryId) {
+                com.andersonlin.moneybook.ui.components.CompactTags(
+                    tags = state.tagSuggestions,
+                    selected = state.tags,
+                    onSelectTag = viewModel::toggleTag
+                )
+            }
+
+            Spacer(Modifier.height(6.dp))
+
+            // 2. 标签下方：左侧新标签添加框（带历史联想与单选添加） + 右侧日历选择
+            var newTagText by remember { mutableStateOf("") }
+            var showTagSuggestions by remember { mutableStateOf(false) }
+            fun confirmTag(name: String) {
+                val trimmed = name.trim()
+                if (trimmed.isNotBlank()) {
+                    SoundFeedback.play(view, SoundType.CRISP)
+                    viewModel.addTag(trimmed)
+                    newTagText = ""
+                    showTagSuggestions = false
+                }
+            }
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 4.dp),
+                    .height(38.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                // 左侧：新标签添加输入框
+                Box(modifier = Modifier.weight(1f)) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().height(38.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Filled.Add,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            androidx.compose.foundation.text.BasicTextField(
+                                value = newTagText,
+                                onValueChange = {
+                                    newTagText = it.take(20)
+                                    showTagSuggestions = it.isNotBlank()
+                                },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true,
+                                textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                    color = MaterialTheme.colorScheme.onSurface
+                                ),
+                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { confirmTag(newTagText) }),
+                                cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
+                                decorationBox = { innerTextField ->
+                                    if (newTagText.isEmpty()) {
+                                        Text(
+                                            "新标签...",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
+                                        )
+                                    }
+                                    innerTextField()
+                                }
+                            )
+                            if (newTagText.isNotBlank()) {
+                                IconButton(
+                                    onClick = { confirmTag(newTagText) },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Text(
+                                        "✓",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    val tagMatches = state.tagSuggestions
+                        .filter { it.contains(newTagText, ignoreCase = true) && it !in state.tags }
+                        .take(6)
+                    DropdownMenu(
+                        expanded = showTagSuggestions && tagMatches.isNotEmpty(),
+                        onDismissRequest = { showTagSuggestions = false },
+                        properties = androidx.compose.ui.window.PopupProperties(focusable = false)
+                    ) {
+                        tagMatches.forEach { matchedTag ->
+                            DropdownMenuItem(
+                                text = { Text(matchedTag, style = MaterialTheme.typography.bodyMedium) },
+                                onClick = { confirmTag(matchedTag) }
+                            )
+                        }
+                    }
+                }
+
+                // 右侧：日历日期选择器
                 Surface(
                     onClick = {
                         SoundFeedback.play(view, SoundType.LIGHT)
                         showDatePicker = true
                     },
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                    modifier = Modifier.height(38.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .padding(horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Icon(
                             Icons.Filled.DateRange,
@@ -466,28 +581,97 @@ fun AddEditBillScreen(
                             modifier = Modifier.size(16.dp),
                             tint = MaterialTheme.colorScheme.primary
                         )
-                        Spacer(Modifier.width(6.dp))
                         Text(
                             text = fullDateLabel(state.dateEpochDay) + " ▾",
                             style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1
                         )
                     }
                 }
+            }
 
-                // 附件区域：已选时展示微缩胶囊预览；未选时展示添加小按钮
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+            Spacer(Modifier.height(6.dp))
+
+            // 3. 备注与附件排版优化：左侧备注输入框 + 右侧附件紧凑胶囊
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(38.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // 左侧：备注输入框
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                 ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Filled.Edit,
+                            contentDescription = null,
+                            modifier = Modifier.size(15.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        androidx.compose.foundation.text.BasicTextField(
+                            value = state.note,
+                            onValueChange = viewModel::setNote,
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                color = MaterialTheme.colorScheme.onSurface
+                            ),
+                            cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
+                            decorationBox = { innerTextField ->
+                                if (state.note.isEmpty()) {
+                                    Text(
+                                        "写点备注（可选）...",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
+                                    )
+                                }
+                                innerTextField()
+                            }
+                        )
+                        if (state.note.isNotEmpty()) {
+                            IconButton(
+                                onClick = { viewModel.setNote("") },
+                                modifier = Modifier.size(20.dp)
+                            ) {
+                                Icon(
+                                    Icons.Filled.Close,
+                                    contentDescription = "清空备注",
+                                    modifier = Modifier.size(13.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // 右侧：附件区域
+                Box {
                     if (state.hasAttachment) {
                         Surface(
-                            shape = RoundedCornerShape(14.dp),
+                            shape = RoundedCornerShape(10.dp),
                             color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
-                            modifier = Modifier.height(30.dp)
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                            modifier = Modifier.height(38.dp)
                         ) {
                             Row(
-                                modifier = Modifier.padding(start = 6.dp, end = 2.dp),
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .padding(horizontal = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
@@ -497,7 +681,7 @@ fun AddEditBillScreen(
                                         contentDescription = "查看大图",
                                         contentScale = ContentScale.Crop,
                                         modifier = Modifier
-                                            .size(20.dp)
+                                            .size(24.dp)
                                             .clip(RoundedCornerShape(4.dp))
                                             .clickable { showImageViewer = true }
                                     )
@@ -506,7 +690,7 @@ fun AddEditBillScreen(
                                         Icons.Filled.InsertDriveFile,
                                         contentDescription = "查看文件",
                                         modifier = Modifier
-                                            .size(16.dp)
+                                            .size(18.dp)
                                             .clickable {
                                                 state.attachmentUri?.let {
                                                     activity?.openAttachmentViewer(it, state.attachmentMime)
@@ -516,8 +700,8 @@ fun AddEditBillScreen(
                                     )
                                 }
                                 Text(
-                                    text = if (state.attachmentIsImage) "图片" else "附件",
-                                    style = MaterialTheme.typography.labelSmall,
+                                    text = if (state.attachmentIsImage) "查看" else "文件",
+                                    style = MaterialTheme.typography.labelMedium,
                                     modifier = Modifier.clickable {
                                         if (state.attachmentIsImage) showImageViewer = true
                                         else state.attachmentUri?.let {
@@ -532,24 +716,27 @@ fun AddEditBillScreen(
                                     Icon(
                                         Icons.Filled.Close,
                                         contentDescription = "移除附件",
-                                        modifier = Modifier.size(12.dp)
+                                        modifier = Modifier.size(13.dp)
                                     )
                                 }
                             }
                         }
-                    }
-
-                    Box {
+                    } else {
+                        var attachmentMenuExpanded by remember { mutableStateOf(false) }
                         Surface(
                             onClick = {
                                 SoundFeedback.play(view, SoundType.LIGHT)
                                 attachmentMenuExpanded = true
                             },
-                            shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                            modifier = Modifier.height(38.dp)
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .padding(horizontal = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
@@ -560,7 +747,7 @@ fun AddEditBillScreen(
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
-                                    text = if (state.hasAttachment) "更换" else "附件",
+                                    text = "附件",
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -595,66 +782,6 @@ fun AddEditBillScreen(
                                         }
                                     }
                                 }
-                            )
-                        }
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(4.dp))
-
-            // 单行轻量备注输入框（不占高度、不遮挡、随输随记）
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(38.dp),
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        Icons.Filled.Edit,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    androidx.compose.foundation.text.BasicTextField(
-                        value = state.note,
-                        onValueChange = viewModel::setNote,
-                        modifier = Modifier.weight(1f),
-                        singleLine = true,
-                        textStyle = MaterialTheme.typography.bodyMedium.copy(
-                            color = MaterialTheme.colorScheme.onSurface
-                        ),
-                        cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
-                        decorationBox = { innerTextField ->
-                            if (state.note.isEmpty()) {
-                                Text(
-                                    "写点备注（可选）...",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
-                                )
-                            }
-                            innerTextField()
-                        }
-                    )
-                    if (state.note.isNotEmpty()) {
-                        IconButton(
-                            onClick = { viewModel.setNote("") },
-                            modifier = Modifier.size(20.dp)
-                        ) {
-                            Icon(
-                                Icons.Filled.Close,
-                                contentDescription = "清空备注",
-                                modifier = Modifier.size(14.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
